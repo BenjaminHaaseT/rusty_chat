@@ -1,0 +1,53 @@
+A simple chat room server, clients should be able to connect to the server and see a list
+of available chat rooms to join. From there the client should be able to join a chat room, or create a new chatroom.
+Once in a chatroom the client needs to be able to send and receive messages.
+
+Server:
+    High level design idea:
+        -> Main Accept loop accepts client connections and sends to broker
+
+        -> Broker accepts request to either join/create new
+           chat rooms, handles errors and invalid requests as well. Needs to have
+           the state of the chat room server i.e. has to maintain some sort of Collection of chat rooms.
+           State:
+                Existing chat rooms and open channels for sending new clients to
+                Needs receivers for harvesting clients who exit chat rooms
+                Needs receivers for harvesting nonexistent chat rooms i.e. empty chat rooms to update the state
+                of the chat room server
+           Functionality:
+                Join:
+                    Whenever a request to join an existing chatroom is received
+                    the broker will send the client to the sub-broker task for managing the chatroom process
+                Create:
+                    The main broker will have to create a new broker task that manages the chat room,
+                    then send the creating client to it
+
+        -> Chatroom Broker, gets spawned by main broker task. Accepts incoming messages, new clients, as well as
+           client disconnection events. When receives an new client, new read/write tasks need to be initiated. When it receives a message
+           the message will need to be broadcast to all subscribing clients. When it receives a disconnection event from a client,
+           it needs to harvest the clients state i.e. connection and messages that are not completely written yet.
+           Needs to have the state of the chatroom at all times. Needs to maintain
+           some sort of broadcast channel so received messages can get broadcast to all writing tasks for the
+           associated chatroom.
+           State:
+                Sending end of a broadcast channel to send received messages to all writing tasks a broadcast sender
+                A receiving disconnection end of a channel to harvest disconnected peers
+                A receiving end to receive messages from peers mpsc, where the chatroom broker has the single receiver
+                A Collection of clients with Uuid's/screen names
+                A sending of a disconnection channel for the chatroom itself when the room is empty
+
+           Functionality:
+                Join:
+                    Whenever a request event is received the Chatroom broker needs to spawn new, read/write tasks
+                    associated with the client. Also needs to store the new client in a collection of some kind.
+                    Needs to spawn the read/write tasks with a sending end of a disconnection event, in the case when
+                    a client disconnects. Also needs to have the clients write task receive from this brokers Broadcast
+                    channel, so the write event can accept new messages from the chatroom.
+                Message:
+                    Needs to accept the message and broadcast it to all subscribing writer tasks
+                Disconnect:
+                    Needs to harvest the disconnected peer, remove it from its internal collection
+                Empty:
+                    Needs to initiate graceful shutdown, sending its own disconnect sender back to main broker
+                    to signal to the broker that the chatroom is now empty and should be removed from the current state
+                    of the main broker task
