@@ -14,21 +14,21 @@ use crate::server_error::prelude::*;
 
 pub async fn chatroom_broker(
     client_receiver: AsyncStdReceiver<Client>,
-    chatroom_shutdown: AsyncStdSender<NullEnum>,
+    chatroom_shutdown: AsyncStdSender<Null>,
     channel_buf_size: usize
 ) -> Result<(), ServerError> {
     // Ensure `client_receiver` is fused
     let mut client_receiver = client_receiver.fuse();
 
-    // Channel for receiving new messages from client writer tasks
-    let (client_msg_sender, client_msg_receiver) = bounded::<Message>(channel_buf_size);
+    // Channel for receiving new MessageEvents from client writer tasks
+    let (client_msg_sender, client_msg_receiver) = bounded::<MessageEvent>(channel_buf_size);
 
-    // Channel for sending received messages from client readers and broadcasting to client writers
+    // Channel for sending received MessageEvents from client readers and broadcasting to client writers
     // `broadcast_msg_receiver` will be cloned and passed to the writing task for each client
-    let (broadcast_msg_sender, broadcast_msg_receiver) = broadcast::channel::<Message>(channel_buf_size);
+    let (broadcast_msg_sender, broadcast_msg_receiver) = broadcast::channel::<MessageEvent>(channel_buf_size);
 
     // Channel for receiving harvesting disconnected clients
-    let (client_disconnect_sender, client_disconnect_receiver) = unbounded::<(Client, TokioBroadcastReceiver<Message>)>();
+    let (client_disconnect_sender, client_disconnect_receiver) = unbounded::<(Client, TokioBroadcastReceiver<MessageEvent>)>();
     let mut client_disconnect_receiver = client_disconnect_receiver.fuse();
 
     // Hashmap for keeping track of all clients
@@ -36,16 +36,16 @@ pub async fn chatroom_broker(
     let mut clients: HashSet<Uuid> = HashSet::new();
 
     loop {
-        // We first need to check for disconnecting clients, joining clients or received messages
+        // We first need to check for new clients joining, disconnecting clients, or new messages received
         let msg = select! {
             new_client = client_receiver.next().fuse() => {
                 match new_client {
                     Some(mut new_client) => {
                         // add client to set of clients
                         clients.insert(new_client.id);
-                        // for sending messages from a client to the chatroom broker
+                        // for sending NewMessageEvents from a client to the chatroom broker
                         let client_msg_sender_clone = client_msg_sender.clone();
-                        // for subscribing to the messages broadcast by the chatroom broker
+                        // for subscribing to the NewMessageEvents broadcast by the chatroom broker
                         let mut broadcast_msg_subscriber = broadcast_msg_sender.subscribe();
                         // for harvesting disconnected clients
                         let mut client_disconnect_sender_clone = client_disconnect_sender.clone();
@@ -53,7 +53,7 @@ pub async fn chatroom_broker(
                         // Spawn a task for handling a new client
                         task::spawn(async move {
                             // TODO: Refactor for handling clients stream
-                            let res = handle_new_client(new_client.stream.take().unwrap(), client_msg_sender_clone, &mut broadcast_msg_subscriber).await;
+                            let res = handle_client(new_client, client_msg_sender_clone, &mut broadcast_msg_subscriber).await;
                             client_disconnect_sender_clone.send((new_client, broadcast_msg_subscriber))
                                 .await
                                 .expect("chatroom broker should be connected");
@@ -77,10 +77,34 @@ pub async fn chatroom_broker(
     todo!()
 }
 
-async fn handle_new_client(
-    client_stream: net::TcpStream,
-    mut msg_sender: AsyncStdSender<Message>,
-    msg_subscriber: &mut TokioBroadcastReceiver<Message>
+async fn handle_client(
+    mut client: Client,
+    mut msg_sender: AsyncStdSender<MessageEvent>,
+    msg_subscriber: &mut TokioBroadcastReceiver<MessageEvent>
+) -> Result<(), ServerError> {
+    let client_stream = client.stream.take().expect("client stream should not be None");
+    // split the client stream into read/write tasks
+    let (client_reader, client_writer) = (&client_stream, &client_stream);
+
+    // For synchronizing with the writer task
+    let (_shutdown_sender, shutdown_receiver) = unbounded::<Null>();
+
+    // spawn a new writing task for this client
+    // TODO: log errors
+    let _ = task::spawn(client_writer_task(client.id, client_writer, msg_subscriber, shutdown_receiver));
+
+    // Attempt to read new messages from the client
+    // TODO: implement parsing of message events from client reader
+    let mut client_reader = client_reader;
+
+    todo!()
+}
+
+async fn client_writer_task(
+    client_id: Uuid,
+    client_writer: &net::TcpStream,
+    msg_subscriber: &mut TokioBroadcastReceiver<MessageEvent>,
+    shutdown_receiver: AsyncStdReceiver<Null>
 ) -> Result<(), ServerError> {
     todo!()
 }

@@ -22,12 +22,15 @@ pub struct Chatroom {
 
 }
 
+// TODO: implement parsing to and from bytes for message events
 #[derive(Clone)]
-pub struct Message {}
+pub enum MessageEvent {
+
+}
 
 pub struct Client {
     pub id: Uuid,
     pub stream: Option<net::TcpStream>
 }
 
-pub enum NullEnum {}
+pub enum Null {}
