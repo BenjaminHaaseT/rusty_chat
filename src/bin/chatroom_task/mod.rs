@@ -21,19 +21,19 @@ pub async fn chatroom_broker(
     let mut client_receiver = client_receiver.fuse();
 
     // Channel for receiving new MessageEvents from client writer tasks
-    let (client_msg_sender, client_msg_receiver) = bounded::<MessageEvent>(channel_buf_size);
+    let (client_msg_sender, client_msg_receiver) = bounded::<Event>(channel_buf_size);
 
     // Channel for sending received MessageEvents from client readers and broadcasting to client writers
     // `broadcast_msg_receiver` will be cloned and passed to the writing task for each client
-    let (broadcast_msg_sender, broadcast_msg_receiver) = broadcast::channel::<MessageEvent>(channel_buf_size);
+    let (broadcast_msg_sender, broadcast_msg_receiver) = broadcast::channel::<Event>(channel_buf_size);
 
     // Channel for receiving harvesting disconnected clients
-    let (client_disconnect_sender, client_disconnect_receiver) = unbounded::<(Client, TokioBroadcastReceiver<MessageEvent>)>();
+    let (client_disconnect_sender, client_disconnect_receiver) = unbounded::<(Client, TokioBroadcastReceiver<Event>)>();
     let mut client_disconnect_receiver = client_disconnect_receiver.fuse();
 
     // Hashmap for keeping track of all clients
     // let mut clients: HashMap<Uuid, Client> = HashMap::new();
-    let mut clients: HashSet<Uuid> = HashSet::new();
+    let mut clients: HashMap<String, Uuid> = HashMap::new();
 
     loop {
         // We first need to check for new clients joining, disconnecting clients, or new messages received
@@ -42,7 +42,7 @@ pub async fn chatroom_broker(
                 match new_client {
                     Some(mut new_client) => {
                         // add client to set of clients
-                        clients.insert(new_client.id);
+                        clients.insert(client.username, client.id);
                         // for sending NewMessageEvents from a client to the chatroom broker
                         let client_msg_sender_clone = client_msg_sender.clone();
                         // for subscribing to the NewMessageEvents broadcast by the chatroom broker
@@ -79,8 +79,8 @@ pub async fn chatroom_broker(
 
 async fn handle_client(
     mut client: Client,
-    mut msg_sender: AsyncStdSender<MessageEvent>,
-    msg_subscriber: &mut TokioBroadcastReceiver<MessageEvent>
+    mut msg_sender: AsyncStdSender<Event>,
+    msg_subscriber: &mut TokioBroadcastReceiver<Event>
 ) -> Result<(), ServerError> {
     let client_stream = client.stream.take().expect("client stream should not be None");
     // split the client stream into read/write tasks
@@ -97,6 +97,8 @@ async fn handle_client(
     // TODO: implement parsing of message events from client reader
     let mut client_reader = client_reader;
 
+    // Needs to clean up after the writer task finishes so that it can return `client_stream`
+    // back to the chatroom broker
     todo!()
 }
 

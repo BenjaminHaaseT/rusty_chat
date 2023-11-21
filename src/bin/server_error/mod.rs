@@ -2,6 +2,7 @@
 
 use std::fmt::{Debug, Display, Formatter};
 use std::error::Error;
+use std::net::ToSocketAddrs;
 
 pub mod prelude {
     pub use super::*;
@@ -9,13 +10,13 @@ pub mod prelude {
 
 #[derive(Debug)]
 pub enum ServerError {
-
+    ConnectionFailed,
 }
 
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            _ => write!(f, "")
+            ServerError::ConnectionFailed => write!(f, "unable to connect"),
         }
     }
 }
