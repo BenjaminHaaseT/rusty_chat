@@ -9,11 +9,18 @@ Server:
         -> Broker accepts request to either join/create new
            chat rooms, handles errors and invalid requests as well. Needs to have
            the state of the chat room server i.e. has to maintain some sort of Collection of chat rooms.
+           When accepting a new client, the broker task will spawn a new single write task for the client.
+           This write task will be the conduit for all responses from the server back to the client, whether they are from
+           the main broker or a specific chatroom broker.
            State:
-                Existing chat rooms and open channels for sending new clients to
-                Needs receivers for harvesting clients who exit chat rooms
-                Needs receivers for harvesting nonexistent chat rooms i.e. empty chat rooms to update the state
-                of the chat room server
+                Needs to know clients usernames/id's
+                Needs to know chatroom names/id's
+                Needs a receiver to receive new connection events
+
+                Needs receiver for harvesting clients who exit chat rooms
+                Needs receiver for harvesting empty chat rooms
+                Needs to know the state about each chatroom i.e capacity and number of clients
+
            Functionality:
                 Join:
                     Whenever a request to join an existing chatroom is received
@@ -21,6 +28,15 @@ Server:
                 Create:
                     The main broker will have to create a new broker task that manages the chat room,
                     then send the creating client to it
+                UpdateUsername:
+                    If a requested username is already taken, the serve needs to send a response to the client informing
+                    them of this so the client can change their username
+
+
+
+
+
+
 
         -> Chatroom Broker, gets spawned by main broker task. Accepts incoming messages, new clients, as well as
            client disconnection events. When receives an new client, new read/write tasks need to be initiated. When it receives a message
