@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_std::net;
 pub use async_std::channel::{Receiver as AsyncStdReceiver, Sender as AsyncStdSender};
 pub use tokio::sync::broadcast::{Sender as TokioBroadcastSender, Receiver as TokioBroadcastReceiver};
+use futures::AsyncReadExt;
 // pub mod room;
 
 pub mod prelude {
@@ -42,6 +43,10 @@ pub enum Event {
         stream: Arc<net::TcpStream>,
         shutdown: AsyncStdReceiver<Null>,
         chatroom_connection: AsyncStdSender<AsyncStdSender<Event>>,
+        peer_id: Uuid,
+    },
+    Message {
+        message: String,
         peer_id: Uuid,
     }
 }
@@ -81,6 +86,39 @@ impl Frame {
             *length ^= (tag[i] as u32) << ((i - idx) * 8);
         }
     }
+
+    pub async fn try_parse<R: AsyncReadExt + Unpin>(tag: &FrameEncodeTag, mut input_reader: R) -> Result<Self, &'static str> {
+        let (type_byte, length) = Frame::deserialize(tag);
+        if type_byte ^ 1 != 0 {
+            Ok(Frame::Quit)
+        } else if type_byte ^ 2 != 0 {
+            let mut chatroom_name_bytes = vec![0; length as usize];
+            input_reader.read_exact(&mut chatroom_name_bytes)
+                .await
+                .map_err(|_| "unable to read bytes from reader")?;
+            Ok(Frame::Join {chatroom_name: String::from_utf8(chatroom_name_bytes).map_err(|_| "unable to parse chatroom name as valid utf8")?})
+        } else if type_byte ^ 4 != 0 {
+            let mut chatroom_name_bytes = vec![0; length as usize];
+            input_reader.read_exact(&mut chatroom_name_bytes)
+                .await
+                .map_err(|_| "unable to read bytes from reader")?;
+            Ok(Frame::Create {chatroom_name: String::from_utf8(chatroom_name_bytes).map_err(|_| "unable to parse chatroom name as valid utf8")?})
+        } else if type_byte ^ 8 != 0 {
+            let mut new_username_bytes = vec![0; length as usize];
+            input_reader.read_exact(&mut new_username_bytes)
+                .await
+                .map_err(|_| "unable to read bytes from reader")?;
+            Ok(Frame::Username {new_username: String::from_utf8(new_username_bytes).map_err(|_| "unable to parse new username as valid utf8")?})
+        } else if type_byte ^ 16 != 0 {
+            let mut message_bytes = vec![0; length as usize];
+            input_reader.read_exact(&mut message_bytes)
+                .await
+                .map_err(|_| "unable to read bytes from reader")?;
+            Ok(Frame::Message {message: String::from_utf8(message_bytes).map_err(|_| "unable to parse message as valid utf8")?})
+        } else {
+            Err("invalid type of frame received")
+        }
+    }
 }
 
 pub type FrameEncodeTag = [u8; 5];
@@ -94,7 +132,7 @@ impl DeserializationTag for FrameDecodeTag {}
 impl SerAsBytes for Frame {
     type Tag = FrameEncodeTag;
 
-    fn serialize(&self) -> Self::SerializationTag {
+    fn serialize(&self) -> Self::Tag {
         let mut tag = [0u8; 5];
 
         match self {
@@ -124,7 +162,7 @@ impl SerAsBytes for Frame {
 impl DeSerAsBytes for Frame {
     type TvlTag = FrameDecodeTag;
 
-    fn deserialize(tag: Self::Tag) -> Self::TvlTag {
+    fn deserialize(tag: &Self::Tag) -> Self::TvlTag {
         if tag[0] & 1 != 0 {
             (1, 0)
         } else if tag[0] & 2 != 0 {
@@ -138,7 +176,7 @@ impl DeSerAsBytes for Frame {
         } else if tag[0] & 8 != 0 {
             let mut username_len = 0;
             Frame::deserialize_len(&tag,1, &mut username_len);
-            (8, username_len, 0)
+            (8, username_len)
         } else if tag[0] & 16 != 0 {
             let mut message_len = 0;
             Frame::deserialize_len(&tag, 1, &mut message_len);
@@ -160,13 +198,13 @@ pub enum Null {}
 
 pub trait SerAsBytes {
     type Tag: SerializationTag;
-    fn serialize(&self) -> Self::SerializationTag;
+    fn serialize(&self) -> Self::Tag;
 }
 
 pub trait DeSerAsBytes: SerAsBytes {
     type TvlTag: DeserializationTag;
 
-    fn deserialize(tag: Self::Tag) -> Self::TvlTag;
+    fn deserialize(tag: &Self::Tag) -> Self::TvlTag;
 }
 
 pub trait SerializationTag {}

@@ -32,6 +32,19 @@ Server:
                     If a requested username is already taken, the serve needs to send a response to the client informing
                     them of this so the client can change their username
 
+           -> Handle Connection Task: Initializes a new client task and all sub-tasks needed to handle a new connecting client
+                Functionality:
+                    Accepts a new client Tcp Stream and sending end of a broker channel
+                    needs to send a request to the broker for a new connecting client
+                        request needs ~ the id of the client (generated in handle connection task),
+                        shared reference to clients tcp stream (for writing task)
+                        a sending end that will send  a new chatroom broker channel that also processes events
+
+                    Task needs to listen to both the clients tcp stream as well as the receiving end of chatroom brokers
+                    sender channel, to be able switch channels when client joins a new chatroom
+
+
+
 
 
 

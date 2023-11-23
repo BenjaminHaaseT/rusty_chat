@@ -5,7 +5,11 @@ use async_std::channel::{self, Sender, Receiver};
 use async_std::net::ToSocketAddrs;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::task;
-use futures::{FutureExt, StreamExt};
+use futures::{
+    future::{Future, FutureExt, Fuse, FusedFuture},
+    stream::{Stream, StreamExt, FusedStream},
+    select,
+};
 use uuid::Uuid;
 
 use crate::server_error::ServerError;
@@ -57,30 +61,95 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
         chatroom_connection: chatroom_broker_sender
     };
 
-    // for sending message events when the client joins a new chatroom.
-    let mut chatroom_sender: Option<AsyncStdSender<Event>> = None;
-
     // send a new client event to the main broker, should not be disconnected
     // TODO: add logging/tracing
     main_broker_sender.send(event)
         .await
         .expect("broker should be connected");
 
+    // for sending message events when the client joins a new chatroom.
+    let mut chatroom_sender: Option<AsyncStdSender<Event>> = None;
+
+    // fuse the readers for selecting
+    let mut client_reader = client_reader;
+    let mut chatroom_broker_receiver = chatroom_broker_receiver.fuse();
+
     let mut frame_tag = [0u8; 5];
 
-    while let Ok(_) = client_reader.read_exact(&mut frame_tag) {
-        // Attempt to parse the frame from the client
-        todo!()
+    loop {
+        // We need to listen to 2 potential events, we receive input from the client's stream
+        // or we receive a sending part of a chatroom broker task
+        let frame = select! {
+            // read input from client
+            res = client_reader.read_exact(&mut frame_tag).fuse() => {
+                match res {
+                    Ok(_) => Frame::try_parse(&frame_tag, &mut client_reader).await.map_err(|e| ServerError::ParseFrame(e))?,
+                    Err(e) => return Err(ServerError::ConnectionFailed),
+                }
+            },
+            chatroom_sender_opt = chatroom_broker_receiver.next().fuse() => {
+                if let Some(chatroom_channel_sender) = chatroom_sender_opt {
+                    chatroom_sender = Some(chatroom_channel_sender);
+                    continue;
+                }
+                break;
+            },
+            default => unreachable!("should not happen")
+        };
+
+        // If we have a chatroom sender channel, we assume all parsed events are being sent to the
+        // current chatroom, otherwise we send events to main broker
+        if let Some(chat_sender) = chatroom_sender.as_ref() {
+            match frame {
+                Frame::Quit => {
+                    chat_sender.send(Event::Quit {peer_id})
+                        .await
+                        .expect("chatroom broker should be connected");
+                }
+                Frame::Message {message} => {
+                    chat_sender.send(Event::Message {message, peer_id})
+                        .await
+                        .expect("chatroom broker should be connected");
+                }
+                _ => panic!("invalid frame sent by client, client may only send 'Quit' and 'Message' variants when connected to a chatroom broker"),
+            }
+
+        } else {
+            match frame {
+                Frame::Quit =>  {
+                    main_broker_sender.send(Event::Quit { peer_id })
+                        .await
+                        .expect("main broker should be connected");
+                    // We are quiting the program all together at this point
+                    break;
+                },
+                Frame::Create {chatroom_name} => {
+                    main_broker_sender.send( Event::Create {chatroom_name, peer_id})
+                        .await
+                        .expect("main broker should be connected");
+                },
+                Frame::Join {chatroom_name} => {
+                    main_broker_sender.send(Event::Join {chatroom_name, peer_id})
+                        .await
+                        .expect("main broker should be connected");
+                },
+                Frame::Username {new_username} => {
+                    main_broker_sender.send(Event::Username {new_username, peer_id})
+                        .await
+                        .expect("main broker should be connected");
+                },
+                _ => panic!("invalid frame sent by client, cannot send messages until connection with chatroom broker is established"),
+            }
+        }
     }
 
-
-    todo!()
+    Ok(())
 }
 
 async fn client_write_loop() -> Result<(), ServerError> {todo!()}
 
 async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
-
+    todo!()
 }
 
 

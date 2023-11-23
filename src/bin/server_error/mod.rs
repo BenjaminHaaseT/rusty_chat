@@ -11,12 +11,14 @@ pub mod prelude {
 #[derive(Debug)]
 pub enum ServerError {
     ConnectionFailed,
+    ParseFrame(&'static str),
 }
 
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             ServerError::ConnectionFailed => write!(f, "unable to connect"),
+            ServerError::ParseFrame(s) => write!(f, "parse frame error: {s}"),
         }
     }
 }
