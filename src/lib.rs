@@ -53,7 +53,7 @@ pub enum Event {
 
 
 // TODO: implement parsing to and from bytes for message events
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
     Quit,
 
@@ -74,6 +74,8 @@ pub enum Frame {
     }
 }
 
+impl Eq for Frame {}
+
 impl Frame {
     fn serialize_len(tag: &mut FrameEncodeTag, idx: usize, length: u32) {
         for i in idx ..idx + 4 {
@@ -89,27 +91,27 @@ impl Frame {
 
     pub async fn try_parse<R: AsyncReadExt + Unpin>(tag: &FrameEncodeTag, mut input_reader: R) -> Result<Self, &'static str> {
         let (type_byte, length) = Frame::deserialize(tag);
-        if type_byte ^ 1 != 0 {
+        if type_byte & 1 != 0 {
             Ok(Frame::Quit)
-        } else if type_byte ^ 2 != 0 {
+        } else if type_byte & 2 != 0 {
             let mut chatroom_name_bytes = vec![0; length as usize];
             input_reader.read_exact(&mut chatroom_name_bytes)
                 .await
                 .map_err(|_| "unable to read bytes from reader")?;
             Ok(Frame::Join {chatroom_name: String::from_utf8(chatroom_name_bytes).map_err(|_| "unable to parse chatroom name as valid utf8")?})
-        } else if type_byte ^ 4 != 0 {
+        } else if type_byte & 4 != 0 {
             let mut chatroom_name_bytes = vec![0; length as usize];
             input_reader.read_exact(&mut chatroom_name_bytes)
                 .await
                 .map_err(|_| "unable to read bytes from reader")?;
             Ok(Frame::Create {chatroom_name: String::from_utf8(chatroom_name_bytes).map_err(|_| "unable to parse chatroom name as valid utf8")?})
-        } else if type_byte ^ 8 != 0 {
+        } else if type_byte & 8 != 0 {
             let mut new_username_bytes = vec![0; length as usize];
             input_reader.read_exact(&mut new_username_bytes)
                 .await
                 .map_err(|_| "unable to read bytes from reader")?;
             Ok(Frame::Username {new_username: String::from_utf8(new_username_bytes).map_err(|_| "unable to parse new username as valid utf8")?})
-        } else if type_byte ^ 16 != 0 {
+        } else if type_byte & 16 != 0 {
             let mut message_bytes = vec![0; length as usize];
             input_reader.read_exact(&mut message_bytes)
                 .await
@@ -119,6 +121,11 @@ impl Frame {
             Err("invalid type of frame received")
         }
     }
+
+    // TODO: maybe
+    // pub fn is_quit(&self) -> bool {
+    //
+    // }
 }
 
 pub type FrameEncodeTag = [u8; 5];
@@ -159,7 +166,22 @@ impl SerAsBytes for Frame {
     }
 }
 
-impl DeSerAsBytes for Frame {
+impl AsBytes for Frame {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&self.serialize());
+        match self {
+            Frame::Quit => {},
+            Frame::Join {chatroom_name} => bytes.extend_from_slice(chatroom_name.as_bytes()),
+            Frame::Create {chatroom_name} => bytes.extend_from_slice(chatroom_name.as_bytes()),
+            Frame::Username {new_username} => bytes.extend_from_slice(new_username.as_bytes()),
+            Frame::Message {message} => bytes.extend_from_slice(message.as_bytes()),
+        }
+        bytes
+    }
+}
+
+impl DeserAsBytes for Frame {
     type TvlTag = FrameDecodeTag;
 
     fn deserialize(tag: &Self::Tag) -> Self::TvlTag {
@@ -201,12 +223,224 @@ pub trait SerAsBytes {
     fn serialize(&self) -> Self::Tag;
 }
 
-pub trait DeSerAsBytes: SerAsBytes {
+pub trait DeserAsBytes: SerAsBytes {
     type TvlTag: DeserializationTag;
 
     fn deserialize(tag: &Self::Tag) -> Self::TvlTag;
 }
 
+pub trait AsBytes: SerAsBytes + DeserAsBytes {
+    fn as_bytes(&self) -> Vec<u8>;
+}
+
 pub trait SerializationTag {}
 
 pub  trait DeserializationTag {}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_serialize_frame() {
+        let frame = Frame::Quit;
+        let frame_tag = frame.serialize();
+
+        println!("{:?}", frame_tag);
+        assert_eq!(frame_tag, [1, 0, 0, 0, 0]);
+
+        let frame = Frame::Join { chatroom_name: String::from("Test Chatroom 1") };
+        let frame_tag = frame.serialize();
+
+        println!("{:?}", frame_tag);
+        assert_eq!(frame_tag, [2, 15, 0, 0, 0]);
+
+        let frame = Frame::Create { chatroom_name: String::from("Chatroom 1") };
+        let frame_tag = frame.serialize();
+
+        println!("{:?}", frame_tag);
+        assert_eq!(frame_tag, [4, 10, 0, 0, 0]);
+
+        let frame = Frame::Username { new_username: String::from("My new username") };
+        let frame_tag = frame.serialize();
+
+        println!("{:?}", frame_tag);
+        assert_eq!(frame_tag, [8, 15, 0, 0, 0]);
+
+        let frame = Frame::Message { message: String::from("My test message") };
+        let frame_tag = frame.serialize();
+
+        println!("{:?}", frame_tag);
+        assert_eq!(frame_tag, [16, 15, 0, 0, 0]);
+    }
+
+    #[test]
+    fn test_deserialize_frame() {
+        let frame = Frame::Quit;
+        let frame_tag = frame.serialize();
+        let (type_byte, length) = Frame::deserialize(&frame_tag);
+
+        println!("type: {}, length: {}", type_byte, length);
+        assert_eq!(type_byte, 1);
+        assert_eq!(length, 0);
+
+        let frame = Frame::Join { chatroom_name: String::from("Test Chatroom 1") };
+        let frame_tag = frame.serialize();
+        let (type_byte, length) = Frame::deserialize(&frame_tag);
+
+        println!("type: {}, length: {}", type_byte, length);
+        assert_eq!(type_byte, 2);
+        assert_eq!(length, 15);
+
+        let frame = Frame::Create { chatroom_name: String::from("Chatroom 1") };
+        let frame_tag = frame.serialize();
+        let (type_byte, length) = Frame::deserialize(&frame_tag);
+
+        println!("type: {}, length: {}", type_byte, length);
+        assert_eq!(type_byte, 4);
+        assert_eq!(length, 10);
+
+        let frame = Frame::Username { new_username: String::from("My new username") };
+        let frame_tag = frame.serialize();
+        let (type_byte, length) = Frame::deserialize(&frame_tag);
+
+        println!("type: {}, length: {}", type_byte, length);
+        assert_eq!(type_byte, 8);
+        assert_eq!(length, 15);
+
+        let frame = Frame::Message { message: String::from("My test message") };
+        let frame_tag = frame.serialize();
+        let (type_byte, length) = Frame::deserialize(&frame_tag);
+
+        println!("type: {}, length: {}", type_byte, length);
+        assert_eq!(type_byte, 16);
+        assert_eq!(length, 15);
+    }
+
+    #[test]
+    fn test_frame_as_bytes() {
+        let frame = Frame::Quit;
+        let frame_bytes = frame.as_bytes();
+
+        println!("{:?}", frame_bytes);
+        assert_eq!(frame_bytes, vec![1, 0, 0, 0, 0]);
+
+        let frame = Frame::Join { chatroom_name: String::from("Test Chatroom 1") };
+        let frame_bytes = frame.as_bytes();
+
+        println!("{:?}", frame_bytes);
+        let mut res_bytes = vec![2, 15, 0, 0, 0];
+        res_bytes.extend_from_slice("Test Chatroom 1".as_bytes());
+        assert_eq!(frame_bytes, res_bytes);
+
+        let frame = Frame::Create { chatroom_name: String::from("Chatroom 1") };
+        let frame_bytes = frame.as_bytes();
+
+        println!("{:?}", frame_bytes);
+        let mut res_bytes = vec![4, 10, 0, 0, 0];
+        res_bytes.extend_from_slice("Chatroom 1".as_bytes());
+        assert_eq!(frame_bytes, res_bytes);
+
+        let frame = Frame::Username { new_username: String::from("My new username") };
+        let frame_bytes = frame.as_bytes();
+
+        println!("{:?}", frame_bytes);
+        let mut res_bytes = vec![8, 15, 0, 0, 0];
+        res_bytes.extend_from_slice("My new username".as_bytes());
+        assert_eq!(frame_bytes, res_bytes);
+
+        let frame = Frame::Message { message: String::from("My test message") };
+        let frame_bytes = frame.as_bytes();
+
+        println!("{:?}", frame_bytes);
+        let mut res_bytes = vec![16, 15, 0, 0, 0];
+        res_bytes.extend_from_slice("My test message".as_bytes());
+        assert_eq!(frame_bytes, res_bytes);
+    }
+
+    #[test]
+    fn test_frame_try_parse() {
+        use async_std::io::Cursor;
+        use async_std::task::block_on;
+
+        // Test quit
+        let frame = Frame::Quit;
+        let mut tag = [0u8; 5];
+        let mut input_stream = Cursor::new(frame.as_bytes());
+
+        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
+
+        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+
+        println!("{:?}", parsed_frame_res);
+        assert!(parsed_frame_res.is_ok());
+
+        let parsed_frame = parsed_frame_res.unwrap();
+
+        assert_eq!(frame, parsed_frame);
+
+        // Test join
+        let frame = Frame::Join {chatroom_name: String::from("Testing testing... Chatroom good name")};
+        let mut tag = [0u8; 5];
+        let mut input_stream = Cursor::new(frame.as_bytes());
+
+        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
+
+        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+
+        println!("{:?}", parsed_frame_res);
+        assert!(parsed_frame_res.is_ok());
+
+        let parsed_frame = parsed_frame_res.unwrap();
+
+        assert_eq!(frame, parsed_frame);
+
+        // Test create
+        let frame = Frame::Create {chatroom_name: String::from("Testing testing... another testing Chatroom good name")};
+        let mut tag = [0u8; 5];
+        let mut input_stream = Cursor::new(frame.as_bytes());
+
+        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
+
+        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+
+        println!("{:?}", parsed_frame_res);
+        assert!(parsed_frame_res.is_ok());
+
+        let parsed_frame = parsed_frame_res.unwrap();
+
+        assert_eq!(frame, parsed_frame);
+
+        // Test username
+        let frame = Frame::Username {new_username: String::from("A good testing username")};
+        let mut tag = [0u8; 5];
+        let mut input_stream = Cursor::new(frame.as_bytes());
+
+        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
+
+        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+
+        println!("{:?}", parsed_frame_res);
+        assert!(parsed_frame_res.is_ok());
+
+        let parsed_frame = parsed_frame_res.unwrap();
+
+        assert_eq!(frame, parsed_frame);
+
+        // Test message
+        let frame = Frame::Message {message: String::from("Testing testing... another test message")};
+        let mut tag = [0u8; 5];
+        let mut input_stream = Cursor::new(frame.as_bytes());
+
+        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
+
+        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+
+        println!("{:?}", parsed_frame_res);
+        assert!(parsed_frame_res.is_ok());
+
+        let parsed_frame = parsed_frame_res.unwrap();
+
+        assert_eq!(frame, parsed_frame);
+    }
+}

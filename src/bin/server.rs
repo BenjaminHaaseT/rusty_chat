@@ -99,7 +99,7 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
 
         // If we have a chatroom sender channel, we assume all parsed events are being sent to the
         // current chatroom, otherwise we send events to main broker
-        if let Some(chat_sender) = chatroom_sender.as_ref() {
+        if let Some(chat_sender) = chatroom_sender.take() {
             match frame {
                 Frame::Quit => {
                     chat_sender.send(Event::Quit {peer_id})
@@ -110,6 +110,8 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
                     chat_sender.send(Event::Message {message, peer_id})
                         .await
                         .expect("chatroom broker should be connected");
+                    // place chat_sender back into chatroom_sender
+                    chatroom_sender = Some(chat_sender);
                 }
                 _ => panic!("invalid frame sent by client, client may only send 'Quit' and 'Message' variants when connected to a chatroom broker"),
             }
