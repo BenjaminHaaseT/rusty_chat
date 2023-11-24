@@ -24,6 +24,38 @@ pub struct Chatroom {
 
 }
 
+pub enum Response {}
+
+type ResponseEncodeTag = [u8; 1];
+
+impl SerializationTag for ResponseEncodeTag {}
+
+type ResponseDecodeTag = (u8, u8);
+
+impl DeserializationTag for ResponseDecodeTag {}
+
+impl SerAsBytes for Response {
+    type Tag = ResponseEncodeTag;
+
+    fn serialize(&self) -> Self::Tag {
+        todo!()
+    }
+}
+
+impl DeserAsBytes for Response {
+    type TvlTag = ResponseDecodeTag;
+
+    fn deserialize(tag: &Self::Tag) -> Self::TvlTag {
+        todo!()
+    }
+}
+
+impl AsBytes for Response {
+    fn as_bytes(&self) -> Vec<u8> {
+        todo!()
+    }
+}
+
 #[derive(Debug)]
 pub enum Event {
     Quit {peer_id: Uuid},

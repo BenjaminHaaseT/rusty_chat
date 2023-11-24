@@ -43,6 +43,24 @@ Server:
                     Task needs to listen to both the clients tcp stream as well as the receiving end of chatroom brokers
                     sender channel, to be able switch channels when client joins a new chatroom
 
+           -> Client Write Task: Initially needs to start up a new task that will write responses from the broker(s) back
+           to the clients socket.
+                   State:
+                        Needs a reference to the clients tcpstream
+                        Needs a receiver from the main broker initially to receive responses from,
+                        when the client is in the lobby
+                        Needs an uninitialized `Stream` that can be set to receive responses from a new chatroom broker
+                        task when the client enters a new chatroom, the new chatroom broker subscriber will be sent
+                        by the main broker to the writer task when the client joins
+                        Needs a receiving end of a channel from the clients reading task to enable graceful shutdown
+                   Functionality:
+                        Accepts a reference to the clients Tcpstream, a response receiver and a disconnection receiver from the broker
+                        Initializes an empty 'Terminated' stream that will be set with the Response receiver from a chatroom broker task
+                        loops collecting responses from the broker(s) and disconnection receiver.
+                        Writes responses sent from broker(s) back to client
+                        breaks when disconnection event is detected
+
+
 
 
 

@@ -1,15 +1,20 @@
 use std::fmt::Debug;
 use std::sync::Arc;
+// use std::
+use std::pin::Pin;
+
 use async_std::io::{self, Read, ReadExt, Write, WriteExt};
 use async_std::channel::{self, Sender, Receiver};
 use async_std::net::ToSocketAddrs;
 use async_std::net::{TcpListener, TcpStream};
-use async_std::task;
+use async_std::task::{self, Poll};
 use futures::{
-    future::{Future, FutureExt, Fuse, FusedFuture},
-    stream::{Stream, StreamExt, FusedStream},
+    future::{Future, FutureExt,  FusedFuture, Fuse},
+    stream::{Stream, StreamExt, FusedStream, poll_fn},
     select,
+    pin_mut,
 };
+use futures::stream::StreamFuture;
 use uuid::Uuid;
 
 use crate::server_error::ServerError;
@@ -19,6 +24,7 @@ mod chatroom_task;
 mod server_error;
 
 async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_buf_size: usize) -> Result<(), ServerError> {
+    // TODO: add logging/tracing
     println!("listening at {:?}...", server_addrs);
 
     let mut listener = TcpListener::bind(server_addrs.clone())
@@ -40,6 +46,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
 }
 
 async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: TcpStream) -> Result<(), ServerError> {
+    // TODO: add logging/tracing
     let client_stream = Arc::new(client_stream);
     let mut client_reader = &*client_stream;
 
@@ -148,7 +155,46 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     Ok(())
 }
 
-async fn client_write_loop() -> Result<(), ServerError> {todo!()}
+async fn client_write_loop(
+    client_stream: Arc<TcpStream>,
+    main_broker_receiver: AsyncStdReceiver<Response>,
+    shutdown: AsyncStdReceiver<Null>
+) -> Result<(), ServerError> {
+    // TODO: Add logging/tracing...
+    println!("Inside client write loop...");
+
+    // Shadow client stream so it can be written too
+    let mut client_stream = &*client_stream;
+
+    // For pivoting broker receivers when client joins a new chatroom
+    let mut chatroom_broker_receiver = Box::pin(poll_fn(move |_| -> Poll<Option<Response>> {Poll::Pending}).fuse());
+
+    // Fuse main broker receiver
+    let mut main_broker_receiver = main_broker_receiver.fuse();
+    let mut shutdown = shutdown.fuse();
+
+    loop {
+        // Select over possible receiving options
+        let response = select! {
+            // Check for a disconnection event
+            null = shutdown.next().fuse() => {
+                println!("Client write loop shutting down");
+                match null {
+                    Some(null) => match null {},
+                    _ => break,
+                }
+            },
+            resp = main_broker_receiver.next().fuse() => {
+            },
+            resp = chatroom_broker_receiver.next().fuse() => {
+            }
+        };
+
+        todo!()
+    }
+
+    todo!()
+}
 
 async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     todo!()
