@@ -23,8 +23,12 @@ pub struct Chatroom {
     // client_disconnect_receiver: AsyncStdReceiver<(Client, AsyncStdSender<Empty>)>
 
 }
+#[derive(Debug, Clone)]
+pub enum Response {
+    // Subscribed { subscription: TokioBroadcastReceiver<Response>}
+}
 
-pub enum Response {}
+unsafe impl Send for Response {}
 
 type ResponseEncodeTag = [u8; 1];
 

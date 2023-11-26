@@ -2,19 +2,22 @@ use std::fmt::Debug;
 use std::sync::Arc;
 // use std::
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use async_std::io::{self, Read, ReadExt, Write, WriteExt};
+use async_std::io::{Read, ReadExt, Write, WriteExt};
 use async_std::channel::{self, Sender, Receiver};
 use async_std::net::ToSocketAddrs;
 use async_std::net::{TcpListener, TcpStream};
-use async_std::task::{self, Poll};
+use async_std::task;
+
 use futures::{
     future::{Future, FutureExt,  FusedFuture, Fuse},
-    stream::{Stream, StreamExt, FusedStream, poll_fn},
+    stream::{Stream, StreamExt, FusedStream},
     select,
-    pin_mut,
 };
-use futures::stream::StreamFuture;
+
+use tokio_stream::wrappers::BroadcastStream;
+
 use uuid::Uuid;
 
 use crate::server_error::ServerError;
@@ -155,9 +158,44 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     Ok(())
 }
 
+// struct PendingSubscription<T: Clone> {
+//     subscriber: Option<TokioBroadcastReceiver<T>>,
+// }
+//
+// impl<T: Clone> PendingSubscription<T> {
+//     pub fn new() -> PendingSubscription<T> {
+//         PendingSubscription { subscriber: None }
+//     }
+//
+//     pub fn init(subscriber: TokioBroadcastReceiver<T>) -> PendingSubscription<T> {
+//         PendingSubscription { subscriber: Some(subscriber) }
+//     }
+//
+//     pub fn set_subscription(&mut self, subscriber: TokioBroadcastReceiver<T>) {
+//         self.subscriber = Some(subscriber);
+//     }
+// }
+//
+// impl<T: Clone> Stream for PendingSubscription<T> {
+//     type Item = Result<T, ServerError>;
+//     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+//         if let Some(mut sub) = self.subscriber.take() {
+//             match sub.recv().poll(cx) {
+//                 Poll::Ready(val) => {
+//                     self.subscriber = Some(sub);
+//                     Poll::Ready(Some(val.map_err(|_e| ServerError::PendingSubscriptionError("error when reading from subscriber's stream"))))
+//                 }
+//                 Poll::Pending  => Poll::Pending
+//             }
+//         }
+//         Poll::Pending
+//     }
+// }
+
 async fn client_write_loop(
     client_stream: Arc<TcpStream>,
     main_broker_receiver: AsyncStdReceiver<Response>,
+    mut chatroom_broker_receiver: AsyncStdReceiver<(TokioBroadcastReceiver<Response>, Response)>,
     shutdown: AsyncStdReceiver<Null>
 ) -> Result<(), ServerError> {
     // TODO: Add logging/tracing...
@@ -166,8 +204,9 @@ async fn client_write_loop(
     // Shadow client stream so it can be written too
     let mut client_stream = &*client_stream;
 
-    // For pivoting broker receivers when client joins a new chatroom
-    let mut chatroom_broker_receiver = Box::pin(poll_fn(move |_| -> Poll<Option<Response>> {Poll::Pending}).fuse());
+    // The broker for the chatroom, yet to be set will yield poll pending until it is reset
+    let (_, chat_receiver) = tokio::sync::broadcast::channel::<Response>(100);
+    let mut chat_receiver = BroadcastStream::new(chat_receiver).fuse();
 
     // Fuse main broker receiver
     let mut main_broker_receiver = main_broker_receiver.fuse();
@@ -175,7 +214,7 @@ async fn client_write_loop(
 
     loop {
         // Select over possible receiving options
-        let response = select! {
+        let response: Response = select! {
             // Check for a disconnection event
             null = shutdown.next().fuse() => {
                 println!("Client write loop shutting down");
@@ -185,12 +224,33 @@ async fn client_write_loop(
                 }
             },
             resp = main_broker_receiver.next().fuse() => {
+                match resp {
+                    _ => todo!()
+                }
             },
-            resp = chatroom_broker_receiver.next().fuse() => {
+            subscription = chatroom_broker_receiver.next().fuse() => {
+                println!("attempting to subscribe to chatroom");
+                match subscription {
+                    Some(resp) => {
+                        let (new_chat_receiver, resp) = resp;
+                        chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
+                        resp
+                    },
+                    None => {
+                        eprintln!("received None from chatroom_broker_receiver");
+                        break;
+                    }
+                }
+            },
+            resp = chat_receiver.next().fuse() => {
+                if let Some(resp) = resp {
+                    resp.map_err(|_| ServerError::SubscriptionError("error receiving response from subscriber"))?
+                } else {
+                    eprintln!("received none from chat_receiver");
+                    break;
+                }
             }
         };
-
-        todo!()
     }
 
     todo!()

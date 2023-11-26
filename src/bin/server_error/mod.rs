@@ -12,6 +12,7 @@ pub mod prelude {
 pub enum ServerError {
     ConnectionFailed,
     ParseFrame(&'static str),
+    SubscriptionError(&'static str),
 }
 
 impl Display for ServerError {
@@ -19,6 +20,7 @@ impl Display for ServerError {
         match self {
             ServerError::ConnectionFailed => write!(f, "unable to connect"),
             ServerError::ParseFrame(s) => write!(f, "parse frame error: {s}"),
+            ServerError::SubscriptionError(s) => write!(f, "error from subscription stream: {s}"),
         }
     }
 }
