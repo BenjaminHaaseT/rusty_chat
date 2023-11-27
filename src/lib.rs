@@ -23,9 +23,33 @@ pub struct Chatroom {
     // client_disconnect_receiver: AsyncStdReceiver<(Client, AsyncStdSender<Empty>)>
 
 }
+
+
 #[derive(Debug, Clone)]
 pub enum Response {
-    // Subscribed { subscription: TokioBroadcastReceiver<Response>}
+    /// A response informing the client they have successfully connected to the chatroom lobby
+    ConnectionOk,
+
+    /// A response informing the client they have successfully subscribed to a chatroom
+    Subscribed { chatroom_name: String },
+
+    /// A response informing the client they have successfully created/subscribed to, a new chatroom
+    ChatroomCreated { chatroom_name: String },
+
+    /// A response informing the client that the chatroom they attempt to join does not exist
+    ChatroomDoesNotExist { chatroom_name: String },
+
+    /// A response that sends a message to the client from the chatroom
+    Message { username: String, peer_id: Uuid,  msg: String },
+
+    /// A response informing the client they have successfully created a valid username
+    UsernameOk { username: String },
+
+    /// A response informing the client that the username they entered already exists
+    UsernameAlreadyExists { msg: String },
+
+    /// A response informing the client they have successfully exited the chatroom
+    Exit { chatroom_name: String},
 }
 
 unsafe impl Send for Response {}

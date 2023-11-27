@@ -158,40 +158,6 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     Ok(())
 }
 
-// struct PendingSubscription<T: Clone> {
-//     subscriber: Option<TokioBroadcastReceiver<T>>,
-// }
-//
-// impl<T: Clone> PendingSubscription<T> {
-//     pub fn new() -> PendingSubscription<T> {
-//         PendingSubscription { subscriber: None }
-//     }
-//
-//     pub fn init(subscriber: TokioBroadcastReceiver<T>) -> PendingSubscription<T> {
-//         PendingSubscription { subscriber: Some(subscriber) }
-//     }
-//
-//     pub fn set_subscription(&mut self, subscriber: TokioBroadcastReceiver<T>) {
-//         self.subscriber = Some(subscriber);
-//     }
-// }
-//
-// impl<T: Clone> Stream for PendingSubscription<T> {
-//     type Item = Result<T, ServerError>;
-//     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//         if let Some(mut sub) = self.subscriber.take() {
-//             match sub.recv().poll(cx) {
-//                 Poll::Ready(val) => {
-//                     self.subscriber = Some(sub);
-//                     Poll::Ready(Some(val.map_err(|_e| ServerError::PendingSubscriptionError("error when reading from subscriber's stream"))))
-//                 }
-//                 Poll::Pending  => Poll::Pending
-//             }
-//         }
-//         Poll::Pending
-//     }
-// }
-
 async fn client_write_loop(
     client_stream: Arc<TcpStream>,
     main_broker_receiver: AsyncStdReceiver<Response>,
@@ -244,7 +210,8 @@ async fn client_write_loop(
             },
             resp = chat_receiver.next().fuse() => {
                 if let Some(resp) = resp {
-                    resp.map_err(|_| ServerError::SubscriptionError("error receiving response from subscriber"))?
+                    resp
+                    .map_err(|_| ServerError::SubscriptionError("error receiving response from chatroom subscriber"))
                 } else {
                     eprintln!("received none from chat_receiver");
                     break;
