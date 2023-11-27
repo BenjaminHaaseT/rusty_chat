@@ -211,7 +211,7 @@ async fn client_write_loop(
             resp = chat_receiver.next().fuse() => {
                 if let Some(resp) = resp {
                     resp
-                    .map_err(|_| ServerError::SubscriptionError("error receiving response from chatroom subscriber"))
+                    .map_err(|_| ServerError::SubscriptionError("error receiving response from chatroom subscriber"))?
                 } else {
                     eprintln!("received none from chat_receiver");
                     break;

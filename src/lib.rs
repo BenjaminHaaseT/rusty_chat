@@ -161,8 +161,9 @@ impl DeserAsBytes for Response {
             Response::deserialize_length(tag, 5, &mut data_len);
             (5, 0, name_len, data_len)
         } else if type_byte ^ 6 == 0 {
-            let id_bytes = tag[1..17].iter().as_slice();
-            let id = Uuid::from_bytes_ref(id_bytes.into()).as_u128();
+            let mut id_bytes = [0u8; 16];
+            id_bytes.copy_from_slice(&tag[1..17]);
+            let id = Uuid::from_bytes(id_bytes).as_u128();
             Response::deserialize_length(tag, 17, &mut name_len);
             Response::deserialize_length(tag, 21, &mut data_len);
             (6, id, name_len, data_len)
@@ -212,7 +213,6 @@ pub enum Event {
     },
     Message {
         message: String,
-        username: String,
         peer_id: Uuid,
     }
 }
