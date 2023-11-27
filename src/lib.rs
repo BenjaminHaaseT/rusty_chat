@@ -41,27 +41,35 @@ pub enum Response {
     /// A response informing the client they have successfully created/subscribed to, a new chatroom
     ChatroomCreated { chatroom_name: String },
 
+    /// A response informing the client the chatroom they attempted to create already exists
+    ChatroomAlreadyExists {chatroom_name: String, lobby_state: Vec<u8>},
+
     /// A response informing the client that the chatroom they attempt to join does not exist
-    ChatroomDoesNotExist { chatroom_name: String },
+    ChatroomDoesNotExist { chatroom_name: String, lobby_state: Vec<u8> },
 
     /// A response that sends a message to the client from the chatroom
     Message { peer_id: Uuid, username: String, msg: String },
 
     /// A response informing the client they have successfully created a valid username
-    // TODO: add functionality for writing the 'state' of the chatroom lobby as well
-    UsernameOk { username: String },
+    UsernameOk { username: String, lobby_state: Vec<u8> },
 
     /// A response informing the client that the username they entered already exists
     UsernameAlreadyExists { username: String },
 
     /// A response informing the client they have successfully exited the chatroom
-    Exit { chatroom_name: String},
+    Exit { chatroom_name: String, lobby_state: Vec<u8>},
 }
 
 impl Response {
     fn serialize_length(tag: &mut ResponseEncodeTag, idx: usize, length: u32) {
         for i in idx ..idx + 4 {
             tag[i] ^= (length >> ((i - idx) * 8)) as u8;
+        }
+    }
+
+    fn deserialize_length(tag: &ResponseEncodeTag, idx: usize, length: &mut u32) {
+        for i in idx ..idx + 4 {
+            *length ^= (tag[i] as u32) << ((i - idx) * 8)
         }
     }
 }
@@ -86,35 +94,43 @@ impl SerAsBytes for Response {
         match self {
             Response::ConnectionOk => bytes[0] ^= 1,
             Response::Subscribed {chatroom_name} => {
-                bytes[0] ^= 1 << 1;
+                bytes[0] ^= 2;
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
             }
             Response::ChatroomCreated {chatroom_name} => {
-                bytes[0] ^= 1 << 2;
+                bytes[0] ^= 3;
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
             }
-            Response::ChatroomDoesNotExist {chatroom_name} => {
-                bytes[0] ^= 1 << 3;
+            Response::ChatroomAlreadyExists {chatroom_name, lobby_state} => {
+                bytes[0] ^= 4;
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
+            }
+            Response::ChatroomDoesNotExist {chatroom_name, lobby_state} => {
+                bytes[0] ^= 5;
+                Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
             }
             Response::Message {peer_id, username, msg} => {
-                bytes[0] ^= 1 << 4;
+                bytes[0] ^= 6;
                 let peer_id_bytes = peer_id.as_bytes();
                 bytes[1..17].copy_from_slice(peer_id_bytes);
                 Response::serialize_length(&mut bytes, 17, username.len() as u32);
                 Response::serialize_length(&mut bytes, 21, msg.len() as u32);
             }
-            Response::UsernameOk {username} => {
-                bytes[0] ^= 1 << 5;
+            Response::UsernameOk {username, lobby_state} => {
+                bytes[0] ^= 7;
                 Response::serialize_length(&mut bytes, 1, username.len() as u32);
+                Response::serialize_length(&mut bytes, 1, lobby_state.len() as u32);
             }
             Response::UsernameAlreadyExists {username} => {
-                bytes[0] ^= 1 << 6;
+                bytes[0] ^= 8;
                 Response::serialize_length(&mut bytes, 1, username.len() as u32);
             }
-            Response::Exit {chatroom_name} => {
-                bytes[0] ^= 1 << 7;
+            Response::Exit {chatroom_name, lobby_state} => {
+                bytes[0] ^= 9;
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                Response::serialize_length(&mut bytes, 1, lobby_state.len() as u32);
             }
         }
         bytes
@@ -125,7 +141,45 @@ impl DeserAsBytes for Response {
     type TvlTag = ResponseDecodeTag;
 
     fn deserialize(tag: &Self::Tag) -> Self::TvlTag {
-        todo!()
+        let type_byte = tag[0];
+        let mut name_len = 0;
+        let mut data_len = 0;
+        if type_byte ^ 1 == 0 {
+            (1, 0u128, 0u32, 0u32)
+        } else if type_byte ^ 2 == 0 {
+            Response::deserialize_length(tag, 1,&mut name_len);
+            (2, 0, name_len, 0)
+        } else if type_byte ^ 3 == 0 {
+            Response::deserialize_length(tag, 1, &mut name_len);
+            (3, 0, name_len, 0)
+        } else if type_byte ^ 4 == 0 {
+            Response::deserialize_length(tag, 1, &mut name_len);
+            Response::deserialize_length(tag, 5, &mut data_len);
+            (4, 0, name_len, data_len)
+        } else if type_byte ^ 5 == 0 {
+            Response::deserialize_length(tag, 1, &mut name_len);
+            Response::deserialize_length(tag, 5, &mut data_len);
+            (5, 0, name_len, data_len)
+        } else if type_byte ^ 6 == 0 {
+            let id_bytes = tag[1..17].iter().as_slice();
+            let id = Uuid::from_bytes_ref(id_bytes.into()).as_u128();
+            Response::deserialize_length(tag, 17, &mut name_len);
+            Response::deserialize_length(tag, 21, &mut data_len);
+            (6, id, name_len, data_len)
+        } else if type_byte ^ 7 == 0 {
+            Response::deserialize_length(tag, 1, &mut name_len);
+            Response::deserialize_length(tag, 5, &mut data_len);
+            (7, 0, name_len, data_len)
+        } else if type_byte ^ 8 == 0 {
+            Response::deserialize_length(tag, 1, &mut name_len);
+            (8, 0, name_len, 0)
+        } else if type_byte ^ 9 == 0 {
+            Response::deserialize_length(tag, 1, &mut name_len);
+            Response::deserialize_length(tag, 5, &mut data_len);
+            (9, 0, name_len, data_len)
+        } else {
+            panic!("invalid type flag detected")
+        }
     }
 }
 
