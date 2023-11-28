@@ -159,10 +159,11 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
 }
 
 async fn client_write_loop(
+    client_id: Uuid,
     client_stream: Arc<TcpStream>,
     main_broker_receiver: AsyncStdReceiver<Response>,
     mut chatroom_broker_receiver: AsyncStdReceiver<(TokioBroadcastReceiver<Response>, Response)>,
-    shutdown: AsyncStdReceiver<Null>
+    shutdown: AsyncStdReceiver<Null>,
 ) -> Result<(), ServerError> {
     // TODO: Add logging/tracing...
     println!("Inside client write loop...");

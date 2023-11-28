@@ -47,6 +47,10 @@ pub enum Response {
     /// A response informing the client that the chatroom they attempt to join does not exist
     ChatroomDoesNotExist { chatroom_name: String, lobby_state: Vec<u8> },
 
+    /// A response informing the client the chatroom they attempted to join is full and cannot
+    /// be joined.
+    ChatroomFull {chatroom_name: String, lobby_state: Vec<u8>},
+
     /// A response that sends a message to the client from the chatroom
     Message { peer_id: Uuid, username: String, msg: String },
 
@@ -58,6 +62,7 @@ pub enum Response {
 
     /// A response informing the client they have successfully exited the chatroom
     Exit { chatroom_name: String, lobby_state: Vec<u8>},
+
 }
 
 impl Response {
@@ -111,24 +116,29 @@ impl SerAsBytes for Response {
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
                 Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
             }
-            Response::Message {peer_id, username, msg} => {
+            Response::ChatroomFull {chatroom_name, lobby_state} => {
                 bytes[0] ^= 6;
+                Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
+            }
+            Response::Message {peer_id, username, msg} => {
+                bytes[0] ^= 7;
                 let peer_id_bytes = peer_id.as_bytes();
                 bytes[1..17].copy_from_slice(peer_id_bytes);
                 Response::serialize_length(&mut bytes, 17, username.len() as u32);
                 Response::serialize_length(&mut bytes, 21, msg.len() as u32);
             }
             Response::UsernameOk {username, lobby_state} => {
-                bytes[0] ^= 7;
+                bytes[0] ^= 8;
                 Response::serialize_length(&mut bytes, 1, username.len() as u32);
                 Response::serialize_length(&mut bytes, 1, lobby_state.len() as u32);
             }
             Response::UsernameAlreadyExists {username} => {
-                bytes[0] ^= 8;
+                bytes[0] ^= 9;
                 Response::serialize_length(&mut bytes, 1, username.len() as u32);
             }
             Response::Exit {chatroom_name, lobby_state} => {
-                bytes[0] ^= 9;
+                bytes[0] ^= 10;
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
                 Response::serialize_length(&mut bytes, 1, lobby_state.len() as u32);
             }
@@ -161,23 +171,27 @@ impl DeserAsBytes for Response {
             Response::deserialize_length(tag, 5, &mut data_len);
             (5, 0, name_len, data_len)
         } else if type_byte ^ 6 == 0 {
+            Response::deserialize_length(tag, 1, &mut name_len);
+            Response::deserialize_length(tag, 5, &mut data_len);
+            (6, 0, name_len, data_len)
+        } else if type_byte ^ 7 == 0 {
             let mut id_bytes = [0u8; 16];
             id_bytes.copy_from_slice(&tag[1..17]);
             let id = Uuid::from_bytes(id_bytes).as_u128();
             Response::deserialize_length(tag, 17, &mut name_len);
             Response::deserialize_length(tag, 21, &mut data_len);
-            (6, id, name_len, data_len)
-        } else if type_byte ^ 7 == 0 {
-            Response::deserialize_length(tag, 1, &mut name_len);
-            Response::deserialize_length(tag, 5, &mut data_len);
-            (7, 0, name_len, data_len)
+            (7, id, name_len, data_len)
         } else if type_byte ^ 8 == 0 {
             Response::deserialize_length(tag, 1, &mut name_len);
-            (8, 0, name_len, 0)
+            Response::deserialize_length(tag, 5, &mut data_len);
+            (8, 0, name_len, data_len)
         } else if type_byte ^ 9 == 0 {
             Response::deserialize_length(tag, 1, &mut name_len);
+            (9, 0, name_len, 0)
+        } else if type_byte ^ 10  == 0 {
+            Response::deserialize_length(tag, 1, &mut name_len);
             Response::deserialize_length(tag, 5, &mut data_len);
-            (9, 0, name_len, data_len)
+            (10, 0, name_len, data_len)
         } else {
             panic!("invalid type flag detected")
         }
@@ -186,7 +200,41 @@ impl DeserAsBytes for Response {
 
 impl AsBytes for Response {
     fn as_bytes(&self) -> Vec<u8> {
-        todo!()
+        let mut bytes = vec![];
+        bytes.extend_from_slice(&self.serialize());
+        match self {
+            Response::ConnectionOk => {},
+            Response::Subscribed {chatroom_name} => bytes.extend_from_slice(chatroom_name.as_bytes()),
+            Response::ChatroomCreated {chatroom_name} => bytes.extend_from_slice(chatroom_name.as_bytes()),
+            Response::ChatroomAlreadyExists {chatroom_name, lobby_state} => {
+                bytes.extend_from_slice(chatroom_name.as_bytes());
+                bytes.extend_from_slice(lobby_state.as_slice());
+            }
+            Response::ChatroomDoesNotExist {chatroom_name, lobby_state} => {
+                bytes.extend_from_slice(chatroom_name.as_bytes());
+                bytes.extend_from_slice(lobby_state.as_slice());
+            }
+            Response::ChatroomFull {chatroom_name, lobby_state} => {
+                bytes.extend_from_slice(chatroom_name.as_bytes());
+                bytes.extend_from_slice(lobby_state.as_slice());
+            }
+            Response::Message {peer_id, username,msg} => {
+                bytes.extend_from_slice(username.as_bytes());
+                bytes.extend_from_slice(msg.as_bytes());
+            }
+            Response::UsernameOk {username, lobby_state} => {
+                bytes.extend_from_slice(username.as_bytes());
+                bytes.extend_from_slice(lobby_state.as_slice());
+            }
+            Response::UsernameAlreadyExists {username} => {
+                bytes.extend_from_slice(username.as_bytes());
+            }
+            Response::Exit {chatroom_name, lobby_state} => {
+                bytes.extend_from_slice(chatroom_name.as_bytes());
+                bytes.extend_from_slice(lobby_state.as_slice());
+            }
+        }
+        bytes
     }
 }
 
