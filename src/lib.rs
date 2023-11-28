@@ -725,4 +725,108 @@ mod test {
         println!("{:?}", tag);
         assert_eq!(tag, [10, 21, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
+
+    #[test]
+    fn test_deserialize_response() {
+        // Test ConnectionOk
+        let response = Response::ConnectionOk;
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 1);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 0);
+        assert_eq!(data_len, 0);
+
+        // Test Subscribed
+        let response = Response::Subscribed {chatroom_name: String::from("Good test chatroom name")};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 2);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 23);
+        assert_eq!(data_len, 0);
+
+        // Test ChatroomCreated
+        let response = Response::ChatroomCreated {chatroom_name: String::from("Good test chatroom name 42")};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 3);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 26);
+        assert_eq!(data_len, 0);
+
+        // Test ChatroomCreated
+        let response = Response::ChatroomAlreadyExists {chatroom_name: String::from("Good test chatroom name 143"), lobby_state: vec![1, 2, 3, 4]};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 4);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 27);
+        assert_eq!(data_len, 4);
+
+        // Test ChatroomDoesNotExist
+        let response = Response::ChatroomDoesNotExist {chatroom_name: String::from("Good test chatroom"), lobby_state: vec![1, 2, 3, 4, 5]};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 5);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 18);
+        assert_eq!(data_len, 5);
+
+        // Test ChatroomFull
+        let response = Response::ChatroomFull {chatroom_name: String::from("A Good full test chatroom"), lobby_state: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 6);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 25);
+        assert_eq!(data_len, 11);
+
+        // Test Message
+        let peer_id = Uuid::new_v4();
+        let response = Response::Message {peer_id, username: String::from("A good test username"), msg: String::from("A good test message") };
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 7);
+        assert_eq!(id, peer_id.as_u128());
+        assert_eq!(name_len, 20);
+        assert_eq!(data_len, 19);
+
+        // Test UsernameOk
+        let response = Response::UsernameOk {username: String::from("Test Username 42"), lobby_state: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 8);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 16);
+        assert_eq!(data_len, 11);
+
+        // Test UsernameAlreadyExists
+        let response = Response::UsernameAlreadyExists {username: String::from("Bad Test Username 42")};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 9);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 20);
+        assert_eq!(data_len, 0);
+
+        // Test Exit
+        let response = Response::Exit {chatroom_name: String::from("Decent test chatroom name"), lobby_state: vec![0, 1, 2, 3, 4, 5]};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 10);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 25);
+        assert_eq!(data_len, 6);
+    }
 }
