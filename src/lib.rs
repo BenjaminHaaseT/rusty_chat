@@ -131,7 +131,7 @@ impl SerAsBytes for Response {
             Response::UsernameOk {username, lobby_state} => {
                 bytes[0] ^= 8;
                 Response::serialize_length(&mut bytes, 1, username.len() as u32);
-                Response::serialize_length(&mut bytes, 1, lobby_state.len() as u32);
+                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
             }
             Response::UsernameAlreadyExists {username} => {
                 bytes[0] ^= 9;
@@ -140,7 +140,7 @@ impl SerAsBytes for Response {
             Response::Exit {chatroom_name, lobby_state} => {
                 bytes[0] ^= 10;
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
-                Response::serialize_length(&mut bytes, 1, lobby_state.len() as u32);
+                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
             }
         }
         bytes
@@ -656,5 +656,73 @@ mod test {
         let parsed_frame = parsed_frame_res.unwrap();
 
         assert_eq!(frame, parsed_frame);
+    }
+
+    #[test]
+    fn test_serialize_response() {
+        // Test ConnectionOk
+        let response = Response::ConnectionOk;
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test Subscribed
+        let response = Response::Subscribed { chatroom_name: String::from("Test Chatroom") };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [2, 13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test ChatroomCreated
+        let response = Response::ChatroomCreated { chatroom_name: String::from("Test Chatroom 42") };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [3, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test ChatroomAlreadyExists
+        let response = Response::ChatroomAlreadyExists { chatroom_name: String::from("Test Chatroom 43"), lobby_state: vec![38, 23, 1, 1, 0] };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [4, 16, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test ChatroomDoesNotExist
+        let response = Response::ChatroomDoesNotExist { chatroom_name: String::from("Test Chatroom 43"), lobby_state: vec![38, 23, 1, 1, 0] };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [5, 16, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test ChatroomFull
+        let response = Response::ChatroomFull { chatroom_name: String::from("Test Chatroom 44"), lobby_state: vec![38, 23, 1, 1, 0, 0, 0, 0, 34] };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [6, 16, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test Message
+        let peer_id = Uuid::new_v4();
+        let response = Response::Message { peer_id, username: String::from("Good Username"), msg: String::from("Test message") };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        let mut expected_tag = [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_tag[1..17].copy_from_slice(peer_id.as_bytes());
+        expected_tag[17] = 13;
+        expected_tag[21] = 12;
+        assert_eq!(tag, expected_tag);
+
+        // Test UsernameOk
+        let response = Response::UsernameOk {username: String::from("Good test username"), lobby_state: vec![0, 0, 0] };
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [8, 18, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test UsernameAlreadyExists
+        let response = Response::UsernameAlreadyExists {username: String::from("Good test username 42")};
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [9, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test Exit
+        let response = Response::Exit {chatroom_name: String::from("Perfect chatroom name"), lobby_state: vec![42, 42, 42, 42, 1, 0]};
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [10, 21, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 }
