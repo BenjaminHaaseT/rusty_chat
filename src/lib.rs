@@ -66,6 +66,9 @@ pub enum Response {
 }
 
 impl Response {
+    pub async fn try_parse<R: AsyncReadExt + Unpin>(tag: &FrameEncodeTag, mut input_reader: R) -> Result<Self, &'static str> {
+        todo!()
+    }
     fn serialize_length(tag: &mut ResponseEncodeTag, idx: usize, length: u32) {
         for i in idx ..idx + 4 {
             tag[i] ^= (length >> ((i - idx) * 8)) as u8;
@@ -828,5 +831,97 @@ mod test {
         assert_eq!(id, 0);
         assert_eq!(name_len, 25);
         assert_eq!(data_len, 6);
+    }
+
+    #[test]
+    fn test_response_as_bytes() {
+        // Test ConnectionOk
+        let response = Response::ConnectionOk;
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        assert_eq!(response_bytes, vec![1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test Subscribed
+        let response = Response::Subscribed { chatroom_name: String::from("Test Chatroom") };
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![2, 13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(String::from("Test Chatroom").as_bytes());
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test ChatroomCreated
+        let response = Response::ChatroomCreated { chatroom_name: String::from("Test Chatroom 42") };
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![3, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(String::from("Test Chatroom 42").as_bytes());
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test ChatroomAlreadyExists
+        let response = Response::ChatroomAlreadyExists { chatroom_name: String::from("Test Chatroom 43"), lobby_state: vec![97, 98, 99] };
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![4, 16, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(String::from("Test Chatroom 43").as_bytes());
+        expected_bytes.extend_from_slice(&[97, 98, 99]);
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test ChatroomDoesNotExist
+        let response = Response::ChatroomDoesNotExist { chatroom_name: String::from("Test Chatroom 44"), lobby_state: vec![97, 98, 99, 100] };
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![5, 16, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(String::from("Test Chatroom 44").as_bytes());
+        expected_bytes.extend_from_slice(&[97, 98, 99, 100]);
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test ChatroomFull
+        let response = Response::ChatroomFull { chatroom_name: String::from("Another Test Chatroom 45"), lobby_state: vec![97, 98, 99, 100, 101, 103] };
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![6, 24, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(String::from("Another Test Chatroom 45").as_bytes());
+        expected_bytes.extend_from_slice(&[97, 98, 99, 100, 101, 103]);
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test Message
+        let peer_id = Uuid::new_v4();
+        let response = Response::Message { peer_id, username: String::from("A good test username"), msg: String::from("Hello World!")};
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![0; 25];
+        expected_bytes[0] = 7;
+        expected_bytes[1..17].copy_from_slice(peer_id.as_bytes());
+        expected_bytes[17] = 20;
+        expected_bytes[21] = 12;
+        expected_bytes.extend_from_slice(String::from("A good test username").as_bytes());
+        expected_bytes.extend_from_slice(String::from("Hello World!").as_bytes());
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test UsernameOk
+        let response = Response::UsernameOk { username: String::from("My test username"), lobby_state: vec![97, 98, 99, 100, 101, 103] };
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![8, 16, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(String::from("My test username").as_bytes());
+        expected_bytes.extend_from_slice(&[97, 98, 99, 100, 101, 103]);
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test UsernameAlreadyExists
+        let response = Response::UsernameAlreadyExists { username: String::from("My bad test username")};
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![9, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(String::from("My bad test username").as_bytes());
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test Exit
+        let response = Response::Exit { chatroom_name: String::from("Test Exit chatroom name"), lobby_state: vec![97, 97, 98, 99]};
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![10, 23, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(String::from("Test Exit chatroom name").as_bytes());
+        expected_bytes.extend_from_slice(&[97, 97, 98, 99]);
+        assert_eq!(response_bytes, expected_bytes);
     }
 }
