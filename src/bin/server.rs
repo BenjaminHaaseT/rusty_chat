@@ -84,16 +84,14 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     let mut client_reader = client_reader;
     let mut chatroom_broker_receiver = chatroom_broker_receiver.fuse();
 
-    let mut frame_tag = [0u8; 5];
-
     loop {
         // We need to listen to 2 potential events, we receive input from the client's stream
         // or we receive a sending part of a chatroom broker task
         let frame = select! {
             // read input from client
-            res = client_reader.read_exact(&mut frame_tag).fuse() => {
+            res = Frame::try_parse(&mut client_reader).fuse() => {
                 match res {
-                    Ok(_) => Frame::try_parse(&frame_tag, &mut client_reader).await.map_err(|e| ServerError::ParseFrame(e))?,
+                    Ok(frame) => frame,
                     Err(e) => return Err(ServerError::ConnectionFailed),
                 }
             },
@@ -102,6 +100,7 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
                     chatroom_sender = Some(chatroom_channel_sender);
                     continue;
                 }
+                eprintln!("None sent from main broker");
                 break;
             },
             default => unreachable!("should not happen")
@@ -165,10 +164,8 @@ async fn client_write_loop(
     mut chatroom_broker_receiver: AsyncStdReceiver<(TokioBroadcastReceiver<Response>, Response)>,
     shutdown: AsyncStdReceiver<Null>,
 ) -> Result<(), ServerError> {
-    // TODO: Add logging/tracing...
-    println!("Inside client write loop...");
-
-    // Shadow client stream so it can be written too
+    println!("inside client write loop");
+    // Shadow client stream so it can be written to
     let mut client_stream = &*client_stream;
 
     // The broker for the chatroom, yet to be set will yield poll pending until it is reset
@@ -182,6 +179,7 @@ async fn client_write_loop(
     loop {
         // Select over possible receiving options
         let response: Response = select! {
+
             // Check for a disconnection event
             null = shutdown.next().fuse() => {
                 println!("Client write loop shutting down");
@@ -190,11 +188,19 @@ async fn client_write_loop(
                     _ => break,
                 }
             },
+
+            // Check for a response from main broker
             resp = main_broker_receiver.next().fuse() => {
                 match resp {
-                    _ => todo!()
+                    Some(resp) => resp,
+                    None => {
+                        eprintln!("received none from main broker receiver");
+                        return Err(ServerError::ConnectionFailed);
+                    }
                 }
-            },
+            }
+
+            // Check for a new chatroom broker receiver
             subscription = chatroom_broker_receiver.next().fuse() => {
                 println!("attempting to subscribe to chatroom");
                 match subscription {
@@ -205,10 +211,12 @@ async fn client_write_loop(
                     },
                     None => {
                         eprintln!("received None from chatroom_broker_receiver");
-                        break;
+                        return Err(ServerError::ConnectionFailed);
                     }
                 }
             },
+
+            // Check for a response from the chatroom broker
             resp = chat_receiver.next().fuse() => {
                 if let Some(resp) = resp {
                     resp
@@ -219,9 +227,14 @@ async fn client_write_loop(
                 }
             }
         };
+
+        // Write response back to client's stream
+        client_stream.write_all(response.as_bytes().as_slice())
+            .await
+            .map_err(|_| ServerError::ConnectionFailed)?;
     }
 
-    todo!()
+    Ok(())
 }
 
 async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
