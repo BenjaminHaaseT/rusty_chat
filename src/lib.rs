@@ -66,7 +66,7 @@ pub enum Response {
 }
 
 impl Response {
-    /// Attempts to parse a `Response` from the `input_reader` and given `tag`.
+    /// Attempts to parse a `Response` from the `input_reader`.
     ///
     /// #Panics
     /// If an invalid type flag is read form `input_reader`, the method will panic.
@@ -433,20 +433,47 @@ pub enum Frame {
 impl Eq for Frame {}
 
 impl Frame {
+    /// Helper method to reduce code duplication when serializing a `Frame`
+    ///
+    /// Many `Frame` variants have fields which have a length property that needs to be serialized.
+    /// This method provides the functionality to do this.
+    /// Takes `tag`, the tag that we are serializing the `Response` into, `idx` the starting position
+    /// from which to start serializing a length value and `length`, the value that represents the length
+    /// we wish to serialize
     fn serialize_len(tag: &mut FrameEncodeTag, idx: usize, length: u32) {
         for i in idx ..idx + 4 {
             tag[i] ^= ((length >> ((i - idx) * 8)) & 0xff) as u8;
         }
     }
 
+    /// Helper method to reduce code duplication when deserializing a `Frame` tag.
+    ///
+    /// Many `Frame` variants have fields which have a length property that needs to be deserialized.
+    /// This method provides the functionality to do this.
+    /// Takes `tag`, the tag that we are deserializing `length` from, and the starting index `idx`,
+    /// that is the position in the `tag` we should start deserializing bytes from.
     fn deserialize_len(tag: &FrameEncodeTag, idx: usize, length: &mut u32) {
         for i in idx .. idx + 4 {
             *length ^= (tag[i] as u32) << ((i - idx) * 8);
         }
     }
 
-    pub async fn try_parse<R: AsyncReadExt + Unpin>(tag: &FrameEncodeTag, mut input_reader: R) -> Result<Self, &'static str> {
-        let (type_byte, length) = Frame::deserialize(tag);
+    /// Attempts to parse the `Frame` from `input_reader`.
+    ///
+    /// #Panics
+    /// If an invalid type byte is read from `input_reader` (i.e. a byte that does not represent
+    /// a valid type of `Frame`) then the method panics.
+    pub async fn try_parse<R: AsyncReadExt + Unpin>(mut input_reader: R) -> Result<Self, &'static str> {
+        // Read tag from reader
+        let mut tag = [0u8; 5];
+        input_reader.read_exact(&mut tag)
+            .await
+            .map_err(|_| "unable to read frame tag bytes from reader")?;
+
+        // deserialize tag
+        let (type_byte, length) = Frame::deserialize(&tag);
+
+        // Attempt to parse the frame
         if type_byte & 1 != 0 {
             Ok(Frame::Quit)
         } else if type_byte & 2 != 0 {
@@ -477,11 +504,6 @@ impl Frame {
             Err("invalid type of frame received")
         }
     }
-
-    // TODO: maybe
-    // pub fn is_quit(&self) -> bool {
-    //
-    // }
 }
 
 pub type FrameEncodeTag = [u8; 5];
@@ -721,12 +743,9 @@ mod test {
 
         // Test quit
         let frame = Frame::Quit;
-        let mut tag = [0u8; 5];
         let mut input_stream = Cursor::new(frame.as_bytes());
 
-        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
-
-        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+        let parsed_frame_res = block_on(Frame::try_parse(&mut input_stream));
 
         println!("{:?}", parsed_frame_res);
         assert!(parsed_frame_res.is_ok());
@@ -737,12 +756,9 @@ mod test {
 
         // Test join
         let frame = Frame::Join {chatroom_name: String::from("Testing testing... Chatroom good name")};
-        let mut tag = [0u8; 5];
         let mut input_stream = Cursor::new(frame.as_bytes());
 
-        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
-
-        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+        let parsed_frame_res = block_on(Frame::try_parse( &mut input_stream));
 
         println!("{:?}", parsed_frame_res);
         assert!(parsed_frame_res.is_ok());
@@ -753,12 +769,9 @@ mod test {
 
         // Test create
         let frame = Frame::Create {chatroom_name: String::from("Testing testing... another testing Chatroom good name")};
-        let mut tag = [0u8; 5];
         let mut input_stream = Cursor::new(frame.as_bytes());
 
-        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
-
-        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+        let parsed_frame_res = block_on(Frame::try_parse(&mut input_stream));
 
         println!("{:?}", parsed_frame_res);
         assert!(parsed_frame_res.is_ok());
@@ -769,12 +782,9 @@ mod test {
 
         // Test username
         let frame = Frame::Username {new_username: String::from("A good testing username")};
-        let mut tag = [0u8; 5];
         let mut input_stream = Cursor::new(frame.as_bytes());
 
-        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
-
-        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+        let parsed_frame_res = block_on(Frame::try_parse(&mut input_stream));
 
         println!("{:?}", parsed_frame_res);
         assert!(parsed_frame_res.is_ok());
@@ -785,12 +795,9 @@ mod test {
 
         // Test message
         let frame = Frame::Message {message: String::from("Testing testing... another test message")};
-        let mut tag = [0u8; 5];
         let mut input_stream = Cursor::new(frame.as_bytes());
 
-        assert!(block_on(input_stream.read_exact(&mut tag)).is_ok());
-
-        let parsed_frame_res = block_on(Frame::try_parse(&tag, &mut input_stream));
+        let parsed_frame_res = block_on(Frame::try_parse(&mut input_stream));
 
         println!("{:?}", parsed_frame_res);
         assert!(parsed_frame_res.is_ok());
