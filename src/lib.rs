@@ -66,15 +66,154 @@ pub enum Response {
 }
 
 impl Response {
-    pub async fn try_parse<R: AsyncReadExt + Unpin>(tag: &FrameEncodeTag, mut input_reader: R) -> Result<Self, &'static str> {
-        todo!()
+    /// Attempts to parse a `Response` from the `input_reader` and given `tag`.
+    ///
+    /// #Panics
+    /// If an invalid type flag is read form `input_reader`, the method will panic.
+    pub async fn try_parse<R: AsyncReadExt + Unpin>(mut input_reader: R) -> Result<Self, &'static str> {
+        // Create tag, and attempt to read from reader
+        let mut tag = [0u8; 25];
+        input_reader.read_exact(&mut tag)
+            .await
+            .map_err(|_| "unable to read tag from reader")?;
+
+        // Deserialize tag
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+
+        if type_byte ^ 1 == 0 {
+            Ok(Response::ConnectionOk)
+
+        } else if type_byte ^ 2 == 0 {
+            let mut chatroom_name_bytes = vec![0; name_len as usize];
+            input_reader.read_exact(chatroom_name_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read chatroom name bytes from reader")?;
+            let chatroom_name = String::from_utf8(chatroom_name_bytes)
+                .map_err(|_| "unable to parse chatroom name as valid utf8")?;
+            Ok(Response::Subscribed {chatroom_name})
+
+        } else if type_byte ^ 3 == 0 {
+            let mut chatroom_name_bytes = vec![0; name_len as usize];
+            input_reader.read_exact(chatroom_name_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read chatroom name bytes from reader")?;
+            let chatroom_name = String::from_utf8(chatroom_name_bytes)
+                .map_err(|_| "unable to parse chatroom name as valid utf8")?;
+            Ok(Response::ChatroomCreated {chatroom_name})
+
+        } else if type_byte ^ 4 == 0 {
+            let mut chatroom_name_bytes = vec![0; name_len as usize];
+            let mut lobby_state_bytes = vec![0; data_len as usize];
+            input_reader.read_exact(chatroom_name_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read chatroom name bytes from reader")?;
+            let chatroom_name = String::from_utf8(chatroom_name_bytes)
+                .map_err(|_| "unable to parse chatroom name as valid utf8")?;
+            input_reader.read_exact(lobby_state_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read lobby state bytes from reader")?;
+            Ok(Response::ChatroomAlreadyExists {chatroom_name, lobby_state})
+
+        } else if type_byte ^ 5 == 0 {
+            let mut chatroom_name_bytes = vec![0; name_len as usize];
+            let mut lobby_state_bytes = vec![0; data_len as usize];
+            input_reader.read_exact(chatroom_name_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read chatroom name bytes from reader")?;
+            let chatroom_name = String::from_utf8(chatroom_name_bytes)
+                .map_err(|_| "unable to parse chatroom name as valid utf8")?;
+            input_reader.read_exact(lobby_state_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read lobby state bytes from reader")?;
+            Ok(Response::ChatroomDoesNotExist {chatroom_name, lobby_state})
+
+        } else if type_byte ^ 6 == 0 {
+            let mut chatroom_name_bytes = vec![0; name_len as usize];
+            let mut lobby_state_bytes = vec![0; data_len as usize];
+            input_reader.read_exact(chatroom_name_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read chatroom name bytes from reader")?;
+            let chatroom_name = String::from_utf8(chatroom_name_bytes)
+                .map_err(|_| "unable to parse chatroom name as valid utf8")?;
+            input_reader.read_exact(lobby_state_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read lobby state bytes from reader")?;
+            Ok(Response::ChatroomFull {chatroom_name, lobby_state})
+
+        } else if type_byte ^ 7 == 0 {
+            let mut username_bytes = vec![0; name_len as usize];
+            let mut msg_bytes = vec![0; data_len as usize];
+            input_reader.read_exact(username_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read username bytes from reader")?;
+            input_reader.read_exact(msg_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read message bytes from reader")?;
+            let username = String::from_utf8(username_bytes)
+                .map_err(|_| "unable to parse username bytes as valid utf8")?;
+            let msg = String::from_utf8(msg_bytes)
+                .map_err(|_| "unable to parse message as valid utf8")?;
+            Ok(Response::Message {peer_id: Uuid::from_u128(id), username, msg})
+
+        } else if type_byte ^ 8 == 0 {
+            let mut username_bytes = vec![0; name_len as usize];
+            let mut lobby_state_bytes = vec![0; data_len as usize];
+            input_reader.read_exact(username_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read username bytes from reader")?;
+            input_reader.read_exact(lobby_state_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read lobby state bytes from reader")?;
+            let username = String::from_utf8(username_bytes)
+                .map_err(|_| "unable to parse username bytes as valid utf8")?;
+
+            Ok(Response::UsernameOk {username, lobby_state})
+        } else if type_byte ^ 9 == 0 {
+            let mut username_bytes = vec![0; name_len as usize];
+            input_reader.read_exact(username_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read username bytes from reader")?;
+            let username = String::from_utf8(username_bytes)
+                .map_err(|_| "unable to parse username bytes as valid utf8")?;
+            Ok(Response::UsernameAlreadyExists {username})
+
+        } else if type_byte ^ 10 == 0 {
+            let mut chatroom_name_bytes = vec![0; name_len as usize];
+            let mut lobby_state_bytes = vec![0; data_len as usize];
+            input_reader.read_exact(chatroom_name_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read chatroom name bytes from reader")?;
+            input_reader.read_exact(lobby_state_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read lobby state bytes from reader")?;
+            let chatroom_name = String::from_utf8(chatroom_name_bytes)
+                .map_err(|_| "unable to parse chatroom name bytes as valid utf8")?;
+
+            Ok(Response::Exit{chatroom_name, lobby_state})
+        } else {
+            panic!("invalid type byte detected");
+        }
     }
+
+    /// Helper method to reduce code duplication when serializing a `Response`
+    ///
+    /// Many `Response` variants have fields which have a length property that needs to be serialized.
+    /// This method provides the functionality to do this.
+    /// Takes `tag`, the tag that we are serializing the `Response` into, `idx` the starting position
+    /// from which to start serializing a length value and `length`, the value that represents the length
+    /// we wish to serialize
     fn serialize_length(tag: &mut ResponseEncodeTag, idx: usize, length: u32) {
         for i in idx ..idx + 4 {
             tag[i] ^= (length >> ((i - idx) * 8)) as u8;
         }
     }
 
+    /// Helper method to reduce code duplication when deserializing a `Response` tag.
+    ///
+    /// Many `Response` variants have fields which have a length property that needs to be deserialized.
+    /// This method provides the functionality to do this.
+    /// Takes `tag`, the tag that we are deserializing `length` from, and the starting index `idx`,
+    /// that is the position in the `tag` we should start deserializing bytes from.
     fn deserialize_length(tag: &ResponseEncodeTag, idx: usize, length: &mut u32) {
         for i in idx ..idx + 4 {
             *length ^= (tag[i] as u32) << ((i - idx) * 8)
