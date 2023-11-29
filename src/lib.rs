@@ -112,7 +112,7 @@ impl Response {
             input_reader.read_exact(lobby_state_bytes.as_mut_slice())
                 .await
                 .map_err(|_| "unable to read lobby state bytes from reader")?;
-            Ok(Response::ChatroomAlreadyExists {chatroom_name, lobby_state})
+            Ok(Response::ChatroomAlreadyExists {chatroom_name, lobby_state: lobby_state_bytes})
 
         } else if type_byte ^ 5 == 0 {
             let mut chatroom_name_bytes = vec![0; name_len as usize];
@@ -125,7 +125,7 @@ impl Response {
             input_reader.read_exact(lobby_state_bytes.as_mut_slice())
                 .await
                 .map_err(|_| "unable to read lobby state bytes from reader")?;
-            Ok(Response::ChatroomDoesNotExist {chatroom_name, lobby_state})
+            Ok(Response::ChatroomDoesNotExist {chatroom_name, lobby_state: lobby_state_bytes})
 
         } else if type_byte ^ 6 == 0 {
             let mut chatroom_name_bytes = vec![0; name_len as usize];
@@ -138,7 +138,7 @@ impl Response {
             input_reader.read_exact(lobby_state_bytes.as_mut_slice())
                 .await
                 .map_err(|_| "unable to read lobby state bytes from reader")?;
-            Ok(Response::ChatroomFull {chatroom_name, lobby_state})
+            Ok(Response::ChatroomFull {chatroom_name, lobby_state: lobby_state_bytes})
 
         } else if type_byte ^ 7 == 0 {
             let mut username_bytes = vec![0; name_len as usize];
@@ -167,7 +167,7 @@ impl Response {
             let username = String::from_utf8(username_bytes)
                 .map_err(|_| "unable to parse username bytes as valid utf8")?;
 
-            Ok(Response::UsernameOk {username, lobby_state})
+            Ok(Response::UsernameOk {username, lobby_state: lobby_state_bytes})
         } else if type_byte ^ 9 == 0 {
             let mut username_bytes = vec![0; name_len as usize];
             input_reader.read_exact(username_bytes.as_mut_slice())
@@ -189,7 +189,7 @@ impl Response {
             let chatroom_name = String::from_utf8(chatroom_name_bytes)
                 .map_err(|_| "unable to parse chatroom name bytes as valid utf8")?;
 
-            Ok(Response::Exit{chatroom_name, lobby_state})
+            Ok(Response::Exit{chatroom_name, lobby_state: lobby_state_bytes})
         } else {
             panic!("invalid type byte detected");
         }
@@ -1062,5 +1062,10 @@ mod test {
         expected_bytes.extend_from_slice(String::from("Test Exit chatroom name").as_bytes());
         expected_bytes.extend_from_slice(&[97, 97, 98, 99]);
         assert_eq!(response_bytes, expected_bytes);
+    }
+
+    #[test]
+    fn test_try_parse_response() {
+        todo!()
     }
 }
