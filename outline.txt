@@ -6,31 +6,29 @@ Server:
     High level design idea:
         -> Main Accept loop accepts client connections and sends to broker
 
-        -> Broker accepts request to either join/create new
-           chat rooms, handles errors and invalid requests as well. Needs to have
-           the state of the chat room server i.e. has to maintain some sort of Collection of chat rooms.
-           When accepting a new client, the broker task will spawn a new single write task for the client.
-           This write task will be the conduit for all responses from the server back to the client, whether they are from
-           the main broker or a specific chatroom broker.
-           State:
-                Needs to know clients usernames/id's
-                Needs to know chatroom names/id's
-                Needs a receiver to receive new connection events
+        -> Broker Task: The main task that handles all incoming and outgoing requests/responses from the chatroom lobby.
+                        Needs to be able to accept new client connections and events from connecting clients. Needs a
+                        way to spawn/connect/manage state of chatroom broker tasks as well. Needs a way to manage the state of connected
+                        and disconnecting clients. The broker task should listen for events triggered by connecting/already
+                        connected clients, and
+                        spawned chatroom sub-broker tasks. The main broker task should manage the state necessary
+                        for these tasks and implement graceful shutdown.
 
-                Needs receiver for harvesting clients who exit chat rooms
-                Needs receiver for harvesting empty chat rooms
-                Needs to know the state about each chatroom i.e capacity and number of clients
+                State:
+                    Needs a map for peer ids to writing task channels, potentially more information should be mapped to
+                    by clients id as well i.e. current chatroom if any etc...
+                    Keep record of all recorded usernames
+                    Need to manage the state of chatroom-sub-broker tasks, use id's to map from chatroom sub-broker id
+                    to chatroom name, and subscription end of a channel, current capacity etc..
+                    Keep hashset record of recorded chatroom names as well
 
-           Functionality:
-                Join:
-                    Whenever a request to join an existing chatroom is received
-                    the broker will send the client to the sub-broker task for managing the chatroom process
-                Create:
-                    The main broker will have to create a new broker task that manages the chat room,
-                    then send the creating client to it
-                UpdateUsername:
-                    If a requested username is already taken, the serve needs to send a response to the client informing
-                    them of this so the client can change their username
+                Functionality:
+                    Takes a receiving end of a channel that listens for client generated events. Spawns a channel for harvesting
+                    disconnected peers as well. Instantiate data structures needed for keeping track of state.
+                    Loop selecting over possible input channels and perform necessary logic.
+                    graceful shutdown.
+
+
 
            -> Handle Connection Task: Initializes a new client task and all sub-tasks needed to handle a new connecting client
                 Functionality:

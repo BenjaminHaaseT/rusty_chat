@@ -1,8 +1,10 @@
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
 // use std::
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
 
 use async_std::io::{Read, ReadExt, Write, WriteExt};
 use async_std::channel::{self, Sender, Receiver};
@@ -157,6 +159,7 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     Ok(())
 }
 
+// TODO: need to find a way to handle the exit from a chatroom
 async fn client_write_loop(
     client_id: Uuid,
     client_stream: Arc<TcpStream>,
@@ -172,7 +175,7 @@ async fn client_write_loop(
     let (_, chat_receiver) = tokio::sync::broadcast::channel::<Response>(100);
     let mut chat_receiver = BroadcastStream::new(chat_receiver).fuse();
 
-    // Fuse main broker receiver
+    // Fuse main broker receiver and shutdown streams
     let mut main_broker_receiver = main_broker_receiver.fuse();
     let mut shutdown = shutdown.fuse();
 
@@ -218,6 +221,7 @@ async fn client_write_loop(
 
             // Check for a response from the chatroom broker
             resp = chat_receiver.next().fuse() => {
+                // TODO: handle the exit case from the chatroom
                 if let Some(resp) = resp {
                     resp
                     .map_err(|_| ServerError::SubscriptionError("error receiving response from chatroom subscriber"))?
@@ -237,7 +241,116 @@ async fn client_write_loop(
     Ok(())
 }
 
+#[derive(Debug)]
+struct Client {
+    id: Uuid,
+    username: Option<String>,
+    write_task_sender: AsyncStdSender<Response>,
+    chatroom_broker_id: Option<Uuid>,
+}
+
+#[derive(Debug)]
+pub struct Chatroom {
+    id: Uuid,
+    name: String,
+    client_subscriber: TokioBroadcastSender<Response>,
+    client_write_sender: AsyncStdSender<Event>,
+    capacity: usize,
+    num_clients: usize,
+}
+
+enum BrokerEvent {}
+
 async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
+    // For keeping track of current clients
+    let mut clients:HashMap<Uuid, Client> = HashMap::new();
+    let mut client_usernames: HashSet<String> = HashSet::new();
+
+    // Channel for harvesting disconnected clients
+    let (
+        client_disconnection_sender,
+        client_disconnection_receiver
+    ) = channel::unbounded::<(Uuid, AsyncStdReceiver<Response>, AsyncStdReceiver<TokioBroadcastReceiver<Response>>)>();
+
+    // For keeping track of chatroom sub-broker tasks
+    let mut chatroom_brokers: HashMap<Uuid, Chatroom> = HashMap::new();
+    let mut chatroom_names : HashSet<String> = HashSet::new();
+
+    // Channel for communicating with chatroom-sub-broker tasks
+    let (sub_broker_sender, sub_broker_receiver) = channel::unbounded::<Event>();
+
+    // Channel for harvesting disconnected chatroom-sub-broker tasks
+    let (_disconnected_sub_broker_sender, disconnected_sub_broker_receiver) = channel::unbounded::<(Uuid, AsyncStdSender<Event>, TokioBroadcastSender<Response>)>();
+
+    // Fuse receivers
+    let mut event_receiver = event_receiver.fuse();
+    let mut client_disconnection_receiver = client_disconnection_receiver.fuse();
+    let mut sub_broker_receiver = sub_broker_receiver.fuse();
+    let mut disconnected_sub_broker_receiver = disconnected_sub_broker_receiver.fuse();
+
+    // loop and listen for events triggered by input channels
+    loop {
+
+        // We can receive events from disconnecting clients, connected clients or sub_broker tasks
+        let event = select! {
+
+            // Listen for disconnecting clients
+            disconnection = client_disconnection_receiver.next().fuse() => {
+                // Harvest the data sent by the client's disconnecting procedure
+                let (peer_id, client_responses, client_messasges) = disconnection;
+                // Remove the client
+                let removed_client = clients.remove(&peer_id);
+
+                // Ensure the client does it exist, it is a panic condition if the client does not exist
+                assert!(removed_client.is_some(), "client should exist in 'clients' map");
+
+                // Check if the client has a set username
+                if let Some(username) = removed_client.as_ref().unwrap().username.as_ref() {
+                    // Ensure the client's username is removed, it is a panic condition if the client's
+                    // username is not set in the hashset
+                    assert!(
+                        client_usernames.remove(username),
+                        "client user name should exist in 'client_usernames' set"
+                    );
+                }
+
+                // Check if the client disconnected while inside a chatroom or not, if so ensure
+                // we update the count of number of clients for the specified chatroom
+                if let Some(chatroom_id) = removed_client.as_ref().unwrap().chatroom_broker_id.as_ref() {
+                    // Ensure the chatroom_id is contained in, it is a panic condition if the chatroom broker's
+                    // id does not exist in the hashmap
+                    assert!(chatroom_brokers.contains_key(chatroom_id), "chatroom id should exist in 'chatroom_brokers' map");
+
+                    // Update the client count for this chatroom
+                    chatroom_brokers.get_mut(&chatroom_id).unwrap().num_clients -= 1;
+                }
+
+                // Continue listening for more events
+                continue;
+            },
+
+            // Listen for disconnection chatroom-sub-broker tasks
+            disconnection = disconnected_sub_broker_receiver.next().fuse() => {
+                let (chatroom_id, sub_broker_events, sub_broker_messages) = disconnection;
+                todo!()
+            }
+
+            // Listen for events triggered by clients
+            event = event_receiver.next().fuse() => {
+                match event {
+                    Some(event) => event,
+                    None => break,
+                }
+            }
+
+            // Listen for events triggered by sub-broker-tasks
+            event = sub_broker_receiver.next().fuse() => {
+                todo!()
+            }
+
+        };
+    }
+
     todo!()
 }
 
