@@ -298,7 +298,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
     // Fuse receivers
     let mut event_receiver = event_receiver.fuse();
     let mut client_disconnection_receiver = client_disconnection_receiver.fuse();
-    let mut sub_broker_receiver = client_exit_sub_broker_receiver.fuse();
+    let mut client_exit_sub_broker_receiver = client_exit_sub_broker_receiver.fuse();
     let mut disconnected_sub_broker_receiver = disconnected_sub_broker_receiver.fuse();
 
     loop {
@@ -363,7 +363,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 }
             }
 
-            // Listen for events triggered by sub-broker-tasks
+            // Listen for exiting clients from sub-brokers
             event = sub_broker_receiver.next().fuse() => {
                 todo!()
             }
