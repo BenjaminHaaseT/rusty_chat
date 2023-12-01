@@ -49,7 +49,13 @@ pub enum Response {
     UsernameAlreadyExists { username: String },
 
     /// A response informing the client they have successfully exited the chatroom
-    Exit { chatroom_name: String, lobby_state: Vec<u8>},
+    ExitChatroom { chatroom_name: String},
+
+    /// A response informing the client they have rejoined the lobby
+    Lobby {lobby_state: Vec<u8>},
+
+    /// A response informing the client they have exited the lobby
+    ExitLobby,
 
 }
 
@@ -167,17 +173,21 @@ impl Response {
 
         } else if type_byte ^ 10 == 0 {
             let mut chatroom_name_bytes = vec![0; name_len as usize];
-            let mut lobby_state_bytes = vec![0; data_len as usize];
             input_reader.read_exact(chatroom_name_bytes.as_mut_slice())
                 .await
                 .map_err(|_| "unable to read chatroom name bytes from reader")?;
-            input_reader.read_exact(lobby_state_bytes.as_mut_slice())
-                .await
-                .map_err(|_| "unable to read lobby state bytes from reader")?;
             let chatroom_name = String::from_utf8(chatroom_name_bytes)
                 .map_err(|_| "unable to parse chatroom name bytes as valid utf8")?;
 
-            Ok(Response::Exit{chatroom_name, lobby_state: lobby_state_bytes})
+            Ok(Response::ExitChatroom{chatroom_name})
+        } else if type_byte ^ 11 == 0 {
+            let mut lobby_state_bytes = vec![0; data_len as usize];
+            input_reader.read_exact(lobby_state_bytes.as_mut_slice())
+                .await
+                .map_err(|_| "unable to read lobby state bytes from reader")?;
+            Ok(Response::Lobby {lobby_state: lobby_state_bytes})
+        } else if type_byte ^ 12 == 0 {
+            Ok(Response::ExitLobby)
         } else {
             panic!("invalid type byte detected");
         }
@@ -267,11 +277,15 @@ impl SerAsBytes for Response {
                 bytes[0] ^= 9;
                 Response::serialize_length(&mut bytes, 1, username.len() as u32);
             }
-            Response::Exit {chatroom_name, lobby_state} => {
+            Response::ExitChatroom {chatroom_name} => {
                 bytes[0] ^= 10;
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
-                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
             }
+            Response::Lobby {lobby_state} => {
+                bytes[0] ^= 11;
+                Response::serialize_length(&mut bytes, 1, lobby_state.len() as u32);
+            }
+            Response::ExitLobby => bytes[0] ^= 12,
         }
         bytes
     }
@@ -320,8 +334,12 @@ impl DeserAsBytes for Response {
             (9, 0, name_len, 0)
         } else if type_byte ^ 10  == 0 {
             Response::deserialize_length(tag, 1, &mut name_len);
-            Response::deserialize_length(tag, 5, &mut data_len);
             (10, 0, name_len, data_len)
+        } else if type_byte ^ 11 == 0 {
+            Response::deserialize_length(tag, 1, &mut data_len);
+            (11, 0, name_len, data_len)
+        } else if type_byte ^ 12 == 0 {
+            (12, 0, 0, 0)
         } else {
             panic!("invalid type flag detected")
         }
@@ -359,10 +377,13 @@ impl AsBytes for Response {
             Response::UsernameAlreadyExists {username} => {
                 bytes.extend_from_slice(username.as_bytes());
             }
-            Response::Exit {chatroom_name, lobby_state} => {
+            Response::ExitChatroom {chatroom_name} => {
                 bytes.extend_from_slice(chatroom_name.as_bytes());
+            }
+            Response::Lobby {lobby_state} => {
                 bytes.extend_from_slice(lobby_state.as_slice());
             }
+            Response::ExitLobby => {}
         }
         bytes
     }
@@ -856,11 +877,23 @@ mod test {
         println!("{:?}", tag);
         assert_eq!(tag, [9, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
-        // Test Exit
-        let response = Response::Exit {chatroom_name: String::from("Perfect chatroom name"), lobby_state: vec![42, 42, 42, 42, 1, 0]};
+        // Test ExitChatroom
+        let response = Response::ExitChatroom {chatroom_name: String::from("Perfect chatroom name")};
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [10, 21, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [10, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test Lobby
+        let response = Response::Lobby {lobby_state: vec![42, 42, 42, 42, 42, 42, 10, 1]};
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [11, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test ExitLobby
+        let response = Response::ExitLobby;
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -956,15 +989,35 @@ mod test {
         assert_eq!(name_len, 20);
         assert_eq!(data_len, 0);
 
-        // Test Exit
-        let response = Response::Exit {chatroom_name: String::from("Decent test chatroom name"), lobby_state: vec![0, 1, 2, 3, 4, 5]};
+        // Test ExitChatroom
+        let response = Response::ExitChatroom {chatroom_name: String::from("Decent test chatroom name")};
         let tag = response.serialize();
         let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
         println!("{:?}", (type_byte, id, name_len, data_len));
         assert_eq!(type_byte, 10);
         assert_eq!(id, 0);
         assert_eq!(name_len, 25);
-        assert_eq!(data_len, 6);
+        assert_eq!(data_len, 0);
+
+        // Test Lobby
+        let response = Response::Lobby {lobby_state: vec![42, 42, 42, 42, 42, 42, 10, 1]};
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 11);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 0);
+        assert_eq!(data_len, 8);
+
+        // Test ExitLobby
+        let response = Response::ExitLobby;
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 12);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 0);
+        assert_eq!(data_len, 0);
     }
 
     #[test]
@@ -1049,14 +1102,29 @@ mod test {
         expected_bytes.extend_from_slice(String::from("My bad test username").as_bytes());
         assert_eq!(response_bytes, expected_bytes);
 
-        // Test Exit
-        let response = Response::Exit { chatroom_name: String::from("Test Exit chatroom name"), lobby_state: vec![97, 97, 98, 99]};
+        // Test ExitChatroom
+        let response = Response::ExitChatroom { chatroom_name: String::from("Test Exit chatroom name")};
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![10, 23, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![10, 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("Test Exit chatroom name").as_bytes());
-        expected_bytes.extend_from_slice(&[97, 97, 98, 99]);
         assert_eq!(response_bytes, expected_bytes);
+
+        // Test Lobby
+        let response = Response::Lobby { lobby_state: vec![97, 98, 99, 100, 101, 103]};
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![11, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        expected_bytes.extend_from_slice(&[97, 98, 99, 100, 101, 103]);
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test ExitLobby
+        let response = Response::ExitLobby;
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(response_bytes, expected_bytes);
+
     }
 
     #[test]
@@ -1166,8 +1234,30 @@ mod test {
         let parsed_response = parsed_response_res.unwrap();
         assert_eq!(parsed_response, response);
 
-        // Test Exit
-        let response = Response::Exit {chatroom_name: String::from("A good test chatroom name for exiting"), lobby_state: vec![1, 2, 3, 4, 5, 97, 98, 99]};
+        // Test ExitChatroom
+        let response = Response::ExitChatroom {chatroom_name: String::from("A good test chatroom name for exiting")};
+        let mut input_reader = Cursor::new(response.as_bytes());
+
+        let parsed_response_res = block_on(Response::try_parse(&mut input_reader));
+        println!("{:?}", parsed_response_res);
+        assert!(parsed_response_res.is_ok());
+
+        let parsed_response = parsed_response_res.unwrap();
+        assert_eq!(parsed_response, response);
+
+        // Test Lobby
+        let response = Response::Lobby {lobby_state: vec![6, 6, 6]};
+        let mut input_reader = Cursor::new(response.as_bytes());
+
+        let parsed_response_res = block_on(Response::try_parse(&mut input_reader));
+        println!("{:?}", parsed_response_res);
+        assert!(parsed_response_res.is_ok());
+
+        let parsed_response = parsed_response_res.unwrap();
+        assert_eq!(parsed_response, response);
+
+        // Test ExitLobby
+        let response = Response::ExitLobby;
         let mut input_reader = Cursor::new(response.as_bytes());
 
         let parsed_response_res = block_on(Response::try_parse(&mut input_reader));
