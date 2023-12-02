@@ -3,6 +3,7 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::error::Error;
 use std::net::ToSocketAddrs;
+use uuid::Uuid;
 
 pub mod prelude {
     pub use super::*;
@@ -13,6 +14,8 @@ pub enum ServerError {
     ConnectionFailed,
     ParseFrame(&'static str),
     SubscriptionError(&'static str),
+    StateError(String),
+    ChannelReceiveError(String),
 }
 
 impl Display for ServerError {
@@ -21,8 +24,11 @@ impl Display for ServerError {
             ServerError::ConnectionFailed => write!(f, "unable to connect"),
             ServerError::ParseFrame(s) => write!(f, "parse frame error: {s}"),
             ServerError::SubscriptionError(s) => write!(f, "error from subscription stream: {s}"),
+            ServerError::StateError(s) => write!(f, "state error in server: {s}"),
+            ServerError::ChannelReceiveError(s) => write!(f, "error receiving from channel: {s}"),
         }
     }
 }
 
 impl Error for ServerError {}
+

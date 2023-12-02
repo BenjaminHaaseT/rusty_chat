@@ -437,6 +437,15 @@ pub enum Event {
     }
 }
 
+impl Event {
+    pub fn is_quit(&self) -> bool {
+        match self {
+            Event::Quit {peer_id} => true,
+            _ => false
+        }
+    }
+}
+
 
 // TODO: implement parsing to and from bytes for message events
 #[derive(Debug, Clone, PartialEq)]

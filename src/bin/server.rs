@@ -295,7 +295,7 @@ enum BrokerEvent {}
 
 async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     // For keeping track of current clients
-    let mut clients:HashMap<Uuid, Client> = HashMap::new();
+    let mut clients: HashMap<Uuid, Client> = HashMap::new();
     let mut client_usernames: HashSet<&str> = HashSet::new();
 
     // Channel for harvesting disconnected clients
@@ -322,55 +322,71 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
     loop {
 
-        // We can receive events from disconnecting clients, connected clients or sub_broker tasks
+        // We can receive events from disconnecting clients, connected clients, sub-broker tasks
+        // or disconnecting sub-broker tasks
         let event = select! {
 
             // Listen for disconnecting clients
             disconnection = client_disconnection_receiver.next().fuse() => {
                 // Harvest the data sent by the client's disconnecting procedure and remove the client
-                let (peer_id, client_responses, client_messasges) = disconnection.expect("client disconnection should send data");
-                let removed_client = clients.remove(&peer_id);
+                let (peer_id, _client_responses, _client_messasges) = disconnection
+                        .ok_or(ServerError::ChannelReceiveError(String::from("'client_disconnection_receiver' should send harvestable data")))?;
 
-                // Ensure the client does exist, it is a panic condition if the client does not exist
-                assert!(removed_client.is_some(), "client should exist in 'clients' map");
+                let mut removed_client = clients.remove(&peer_id).ok_or(ServerError::StateError(format!("client with peer id {} should exist in client map", peer_id)))?;
 
-                if let Some(username) = removed_client.as_ref().unwrap().username.as_ref() {
-                    // Ensure the client's username is removed, it is a panic condition if the client's
-                    // username is not set in the hashset
-                    assert!(
-                        client_usernames.remove(username.as_str()),
-                        "client user name should exist in 'client_usernames' set"
-                    );
+
+                if let Some(username) = removed_client.username.as_ref() {
+                    // Attempt to remove clients username from name set
+                    if !client_usernames.remove(username.as_str()) {
+                        return Err(ServerError::StateError(format!("client username {} should exist in set", username)));
+                    }
                 }
 
                 // Check if the client disconnected while inside a chatroom or not, if so ensure
-                // we update the count of number of clients for the specified chatroom
-                if let Some(chatroom_id) = removed_client.as_ref().unwrap().chatroom_broker_id.as_ref() {
-                    // Ensure the chatroom_id is contained in, it is a panic condition if the chatroom broker's
-                    // id does not exist in the hashmap
-                    assert!(chatroom_brokers.contains_key(chatroom_id), "chatroom id should exist in 'chatroom_brokers' map");
+                // we update the client count for the specified chatroom
+                if let Some(chatroom_id) = removed_client.chatroom_broker_id.take() {
 
-                    let chatroom_broker = chatroom_brokers.get_mut(&chatroom_id).unwrap();
+                    // Take chatroom broker for the purpose of updating and potentially removing
+                    let mut chatroom_broker = chatroom_brokers
+                        .remove(&chatroom_id)
+                        .ok_or(ServerError::StateError(format!("chatroom sub-broker with id {} should exist in map", chatroom_id)))?;
+
+                    // Decrement client count for the broker
                     chatroom_broker.num_clients -= 1;
+
+                    // Check if client count is zero, if so remove it from the name set and send a shutdown signal
+                    // do not place broker back into map
                     if chatroom_broker.num_clients == 0 {
-                        match chatroom_broker.shutdown.take() {
-                            Some(shutdown) => drop(shutdown),
-                            None => panic!("chatroom broker should have shutdown sender")
+                        // Attempt to remove name from  name map
+                        if !chatroom_names.remove(chatroom_broker.name.as_str()) {
+                            return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name.as_str())));
                         }
+                        // Attempt to send shutdown signal
+                        match chatroom_broker.shutdown.take() {
+                            Some(shutdown) => {
+                                drop(shutdown)
+                            }
+                            _ => return Err(ServerError::StateError(format!("chatroom sub-broker with id {} should have shutdown set to some", chatroom_id))),
+                        }
+                    } else {
+                        // Otherwise put the broker back into broker's map with updated client count
+                        chatroom_brokers.insert(chatroom_id, chatroom_broker);
                     }
                 }
+
                 // Continue listening for more events
                 continue;
             },
 
             // Listen for disconnection chatroom-sub-broker tasks
             disconnection = disconnected_sub_broker_receiver.next().fuse() => {
-                let (chatroom_id, sub_broker_events, sub_broker_messages) = disconnection.expect("chatroom sub-broker should send data");
-                // Ensure that the chatroom_id exists in chatroom broker hashmap, it is a panic condition
-                // if the id does not exist in the hashmap, similarly with the chatroom names set
-                let removed_chatroom = chatroom_brokers.remove(&chatroom_id);
-                assert!(removed_chatroom.is_some(), "chatroom sub-broker should exist in map");
-                assert!(chatroom_names.remove(removed_chatroom.unwrap().name.as_str()), "chatroom sub-broker name should exist in set");
+                // Harvest the returned data and ensure that the chatroom broker has been successfully removed
+                let (chatroom_id, _sub_broker_events, _sub_broker_messages) = disconnection.ok_or(ServerError::ChannelReceiveError(String::from("received 'None' from 'disconnected_sub_broker_receiver'")))?;
+                if chatroom_brokers.contains_key(&chatroom_id) {
+                    return Err(ServerError::StateError(format!("chatroom sub-broker with id {} should no longer exist in map", chatroom_id)));
+                }
+
+                // Continue listening for more events
                 continue;
             }
 
@@ -384,7 +400,47 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
             // Listen for exiting clients from sub-brokers
             event = client_exit_sub_broker_receiver.next().fuse() => {
-                todo!()
+                let peer_id = event.map_or(
+                    Err(ServerError::ChannelReceiveError(String::from("received 'None' from 'client_exit_sub_broker_receiver'"))),
+                    |e| -> Result<Uuid, ServerError> {
+                        match e {
+                            Event::Quit {peer_id} => Ok(peer_id),
+                            _ => Err(ServerError::ChannelReceiveError(String::from("received invalid 'Event' from 'client_exit_sub_broker_receiver'")))
+                        }
+                    }
+                )?;
+
+                // Ensure we have a client with peer_id
+                let client = clients.get_mut(&peer_id).ok_or(ServerError::StateError(format!("client with id {} should exist in map", peer_id)))?;
+
+                let chatroom_broker_id = client.chatroom_broker_id
+                        .take()
+                        .ok_or(ServerError::StateError(format!("client with id {} should have not have 'chatroom_broker_id' set to 'None'", peer_id)))?;
+
+                // Take chatroom broker from map
+                let mut chatroom_broker = chatroom_brokers
+                .remove(&chatroom_broker_id)
+                .ok_or(ServerError::StateError(format!("chatroom sub-broker with id {} should exist in map", chatroom_broker_id)))?;
+
+                // Decrement client count for the current broker
+                chatroom_broker.num_clients -= 1;
+
+                // Check if we need to initiate a shutdown for the current sub-broker
+                if chatroom_broker.num_clients == 0 {
+                    if !chatroom_names.remove(chatroom_broker.name.as_str()) {
+                        return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
+                    }
+                    match chatroom_broker.shutdown.take() {
+                        Some(shutdown) => drop(shutdown),
+                        _ => return Err(ServerError::StateError(format!("chatroom sub-broker with id {} should have shutdown set to 'Some'", chatroom_broker_id))),
+                    }
+                } else {
+                    // Otherwise re-insert broker back into map
+                    chatroom_brokers.insert(chatroom_broker_id, chatroom_broker);
+                }
+
+                // Continue listening for new events
+                continue;
             }
 
         };
