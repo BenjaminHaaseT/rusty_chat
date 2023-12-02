@@ -51,7 +51,6 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
 }
 
 async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: TcpStream) -> Result<(), ServerError> {
-    // TODO: add logging/tracing
     let client_stream = Arc::new(client_stream);
     let mut client_reader = &*client_stream;
 
@@ -74,7 +73,6 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     };
 
     // send a new client event to the main broker, should not be disconnected
-    // TODO: add logging/tracing
     main_broker_sender.send(event)
         .await
         .expect("broker should be connected");
@@ -98,12 +96,16 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
                 }
             },
             chatroom_sender_opt = chatroom_broker_receiver.next().fuse() => {
-                if let Some(chatroom_channel_sender) = chatroom_sender_opt {
-                    chatroom_sender = Some(chatroom_channel_sender);
-                    continue;
+                match chatroom_sender_opt {
+                    Some(chatroom_channel) => {
+                        chatroom_sender = Some(chatroom_channel);
+                        continue;
+                    },
+                    None => {
+                        eprintln!("received None from 'chatroom_broker_receiver'");
+                        return Err(ServerError::ConnectionFailed);
+                    }
                 }
-                eprintln!("None sent from main broker");
-                break;
             },
             default => unreachable!("should not happen")
         };
@@ -113,6 +115,8 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
         if let Some(chat_sender) = chatroom_sender.take() {
             match frame {
                 Frame::Quit => {
+                    // take chat_sender without replacing, since we are sending a quit message
+                    // client no longer desires to be in this chatroom
                     chat_sender.send(Event::Quit {peer_id})
                         .await
                         .expect("chatroom broker should be connected");
@@ -171,7 +175,7 @@ async fn client_write_loop(
     // Shadow client stream so it can be written to
     let mut client_stream = &*client_stream;
 
-    // The broker for the chatroom, yet to be set will yield poll pending until it is reset
+    // The broker for the chatroom, yet to be set, will yield poll pending until it is reset
     let (_, chat_receiver) = tokio::sync::broadcast::channel::<Response>(100);
     let mut chat_receiver = BroadcastStream::new(chat_receiver).fuse();
 
@@ -210,6 +214,14 @@ async fn client_write_loop(
                 match subscription {
                     Some(resp) => {
                         let (new_chat_receiver, resp) = resp;
+                        // assert that resp is the Subscribed or ChatroomCreated variant
+                        // it is a panic condition if the response sent on this channel from the
+                        // main broker is neither of these variants
+                        assert!(
+                            resp.is_subscribed() || resp.is_chatroom_created(),
+                            "received invalid response from main chatroom broker on 'chatroom_broker_receiver'"
+                        );
+                        // Update chat_receiver so client can receive new messages from chatroom
                         chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
                         resp
                     },
@@ -222,16 +234,21 @@ async fn client_write_loop(
 
             // Check for a response from the chatroom broker
             resp = chat_receiver.next().fuse() => {
-                // TODO: handle the exit case from the chatroom
                 match resp {
                     Some(resp_res) => {
                         match resp_res {
                             Ok(resp) => {
-                                // if let Response::Exit {}
-                                todo!()
+                                // Check if we have received an exit response from the chatroom broker,
+                                // if so we need to update chat_receiver
+                                if resp.is_exit_chatroom() {
+                                    let (_, new_chat_receiver) = tokio::sync::broadcast::channel::<Response>(100);
+                                    let mut new_chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
+                                    chat_receiver = new_chat_receiver;
+                                }
+                                resp
                             }
                             Err(_) => {
-                                eprintln!("received None from chatroom_broker_receiver");
+                                eprintln!("error parsing response from 'chat_receiver'");
                                 return Err(ServerError::ConnectionFailed);
                             }
                         }
@@ -257,7 +274,9 @@ async fn client_write_loop(
 struct Client {
     id: Uuid,
     username: Option<String>,
-    write_task_sender: AsyncStdSender<Response>,
+    main_broker_write_task_sender: AsyncStdSender<Response>,
+    new_chatroom_broker_sender: AsyncStdSender<(TokioBroadcastReceiver<Response>, Response)>,
+
     chatroom_broker_id: Option<Uuid>,
 }
 
@@ -364,7 +383,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
             }
 
             // Listen for exiting clients from sub-brokers
-            event = sub_broker_receiver.next().fuse() => {
+            event = client_exit_sub_broker_receiver.next().fuse() => {
                 todo!()
             }
 

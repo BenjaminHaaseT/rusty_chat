@@ -193,6 +193,27 @@ impl Response {
         }
     }
 
+    pub fn is_exit_chatroom(&self) -> bool {
+        match self {
+            Response::ExitChatroom {chatroom_name} => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_subscribed(&self) -> bool {
+        match self {
+            Response::Subscribed {chatroom_name} => true,
+            _ => false
+        }
+    }
+
+    pub fn is_chatroom_created(&self) -> bool {
+        match self {
+            Response::ChatroomCreated {chatroom_name} => true,
+            _ => false
+        }
+    }
+
     /// Helper method to reduce code duplication when serializing a `Response`
     ///
     /// Many `Response` variants have fields which have a length property that needs to be serialized.
