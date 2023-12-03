@@ -444,12 +444,23 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 // Continue listening for new events
                 continue;
             }
-
         };
 
         // Now attempt to parse event and send a response
         match event {
-            _ => todo!(),
+            Event::Quit {peer_id} => {
+                println!("Logging that client {:?} has quit", peer_id);
+            }
+            Event::Create {peer_id, chatroom_name} => {
+                // Get client reference first, ensure client is a valid connected client
+                let mut client = clients.get_mut(&peer_id)
+                    .ok_or(ServerError::StateError(format!("no client with id {:?} contained in map", peer_id)))?;
+
+                // Check if chatroom_name is already in use, if so new chatroom cannot be created
+                if chatroom_names.contains(chatroom_name.as_str()) {
+                    client.main_broker_write_task_sender.send(Response::ChatroomAlreadyExists {chatroom_name}).await.map_err(|_e| ServerError::ConnectionFailed)?;
+                }
+            }
         }
     }
 
