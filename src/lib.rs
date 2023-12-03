@@ -413,6 +413,7 @@ impl AsBytes for Response {
 #[derive(Debug)]
 pub enum Event {
     Quit {peer_id: Uuid},
+    Lobby {peer_id: Uuid},
     Join {
         chatroom_name: String,
         peer_id: Uuid
@@ -451,6 +452,8 @@ impl Event {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
     Quit,
+
+    Lobby,
 
     Join {
         chatroom_name: String,
@@ -513,27 +516,29 @@ impl Frame {
         let (type_byte, length) = Frame::deserialize(&tag);
 
         // Attempt to parse the frame
-        if type_byte & 1 != 0 {
+        if type_byte ^ 1 == 0 {
             Ok(Frame::Quit)
-        } else if type_byte & 2 != 0 {
+        } else if type_byte ^ 2 == 0 {
+            Ok(Frame::Lobby)
+        } else if type_byte ^ 3 == 0 {
             let mut chatroom_name_bytes = vec![0; length as usize];
             input_reader.read_exact(&mut chatroom_name_bytes)
                 .await
                 .map_err(|_| "unable to read bytes from reader")?;
             Ok(Frame::Join {chatroom_name: String::from_utf8(chatroom_name_bytes).map_err(|_| "unable to parse chatroom name as valid utf8")?})
-        } else if type_byte & 4 != 0 {
+        } else if type_byte ^ 4 == 0 {
             let mut chatroom_name_bytes = vec![0; length as usize];
             input_reader.read_exact(&mut chatroom_name_bytes)
                 .await
                 .map_err(|_| "unable to read bytes from reader")?;
             Ok(Frame::Create {chatroom_name: String::from_utf8(chatroom_name_bytes).map_err(|_| "unable to parse chatroom name as valid utf8")?})
-        } else if type_byte & 8 != 0 {
+        } else if type_byte ^ 5 == 0 {
             let mut new_username_bytes = vec![0; length as usize];
             input_reader.read_exact(&mut new_username_bytes)
                 .await
                 .map_err(|_| "unable to read bytes from reader")?;
             Ok(Frame::Username {new_username: String::from_utf8(new_username_bytes).map_err(|_| "unable to parse new username as valid utf8")?})
-        } else if type_byte & 16 != 0 {
+        } else if type_byte ^ 6 == 0 {
             let mut message_bytes = vec![0; length as usize];
             input_reader.read_exact(&mut message_bytes)
                 .await
@@ -561,20 +566,21 @@ impl SerAsBytes for Frame {
 
         match self {
             Frame::Quit => tag[0] ^= 1,
+            Frame::Lobby => tag[0] ^= 2,
             Frame::Join {chatroom_name} => {
-                tag[0] ^= 1 << 1;
+                tag[0] ^= 3;
                 Frame::serialize_len(&mut tag, 1, chatroom_name.len() as u32);
             }
             Frame::Create {chatroom_name} => {
-                tag[0] ^= 1 << 2;
+                tag[0] ^= 4;
                 Frame::serialize_len(&mut tag, 1, chatroom_name.len() as u32);
             }
             Frame::Username {new_username} => {
-                tag[0] ^= 1 << 3;
+                tag[0] ^= 5;
                 Frame::serialize_len(&mut tag, 1,new_username.len() as u32);
             }
             Frame::Message { message} => {
-                tag[0] ^= 1 << 4;
+                tag[0] ^= 6;
                 Frame::serialize_len(&mut tag, 1, message.len() as u32);
             }
         }
@@ -589,6 +595,7 @@ impl AsBytes for Frame {
         bytes.extend_from_slice(&self.serialize());
         match self {
             Frame::Quit => {},
+            Frame::Lobby => {},
             Frame::Join {chatroom_name} => bytes.extend_from_slice(chatroom_name.as_bytes()),
             Frame::Create {chatroom_name} => bytes.extend_from_slice(chatroom_name.as_bytes()),
             Frame::Username {new_username} => bytes.extend_from_slice(new_username.as_bytes()),
@@ -602,24 +609,26 @@ impl DeserAsBytes for Frame {
     type TvlTag = FrameDecodeTag;
 
     fn deserialize(tag: &Self::Tag) -> Self::TvlTag {
-        if tag[0] & 1 != 0 {
+        if tag[0] ^ 1 == 0 {
             (1, 0)
-        } else if tag[0] & 2 != 0 {
+        } else if tag[0] ^ 2 == 0 {
+            (2, 0)
+        } else if tag[0] ^ 3 == 0 {
             let mut chatroom_name_len = 0u32;
             Frame::deserialize_len(&tag, 1, &mut chatroom_name_len);
-            (2, chatroom_name_len)
-        } else if tag[0] & 4 != 0 {
+            (3, chatroom_name_len)
+        } else if tag[0] ^ 4 == 0 {
             let mut chatroom_name_len = 0u32;
             Frame::deserialize_len(&tag, 1, &mut chatroom_name_len);
             (4, chatroom_name_len)
-        } else if tag[0] & 8 != 0 {
+        } else if tag[0] ^ 5 == 0 {
             let mut username_len = 0;
             Frame::deserialize_len(&tag,1, &mut username_len);
-            (8, username_len)
-        } else if tag[0] & 16 != 0 {
+            (5, username_len)
+        } else if tag[0] ^ 6 == 0 {
             let mut message_len = 0;
             Frame::deserialize_len(&tag, 1, &mut message_len);
-            (16, message_len)
+            (6, message_len)
         } else {
             panic!("invalid type byte detected, unable to deserialize 'Frame' tag")
         }
@@ -666,11 +675,17 @@ mod test {
         println!("{:?}", frame_tag);
         assert_eq!(frame_tag, [1, 0, 0, 0, 0]);
 
+        let frame = Frame::Lobby;
+        let frame_tag = frame.serialize();
+
+        println!("{:?}", frame_tag);
+        assert_eq!(frame_tag, [2, 0, 0, 0, 0]);
+
         let frame = Frame::Join { chatroom_name: String::from("Test Chatroom 1") };
         let frame_tag = frame.serialize();
 
         println!("{:?}", frame_tag);
-        assert_eq!(frame_tag, [2, 15, 0, 0, 0]);
+        assert_eq!(frame_tag, [3, 15, 0, 0, 0]);
 
         let frame = Frame::Create { chatroom_name: String::from("Chatroom 1") };
         let frame_tag = frame.serialize();
@@ -682,13 +697,13 @@ mod test {
         let frame_tag = frame.serialize();
 
         println!("{:?}", frame_tag);
-        assert_eq!(frame_tag, [8, 15, 0, 0, 0]);
+        assert_eq!(frame_tag, [5, 15, 0, 0, 0]);
 
         let frame = Frame::Message { message: String::from("My test message") };
         let frame_tag = frame.serialize();
 
         println!("{:?}", frame_tag);
-        assert_eq!(frame_tag, [16, 15, 0, 0, 0]);
+        assert_eq!(frame_tag, [6, 15, 0, 0, 0]);
     }
 
     #[test]
@@ -701,12 +716,20 @@ mod test {
         assert_eq!(type_byte, 1);
         assert_eq!(length, 0);
 
-        let frame = Frame::Join { chatroom_name: String::from("Test Chatroom 1") };
+        let frame = Frame::Lobby;
         let frame_tag = frame.serialize();
         let (type_byte, length) = Frame::deserialize(&frame_tag);
 
         println!("type: {}, length: {}", type_byte, length);
         assert_eq!(type_byte, 2);
+        assert_eq!(length, 0);
+
+        let frame = Frame::Join { chatroom_name: String::from("Test Chatroom 1") };
+        let frame_tag = frame.serialize();
+        let (type_byte, length) = Frame::deserialize(&frame_tag);
+
+        println!("type: {}, length: {}", type_byte, length);
+        assert_eq!(type_byte, 3);
         assert_eq!(length, 15);
 
         let frame = Frame::Create { chatroom_name: String::from("Chatroom 1") };
@@ -722,7 +745,7 @@ mod test {
         let (type_byte, length) = Frame::deserialize(&frame_tag);
 
         println!("type: {}, length: {}", type_byte, length);
-        assert_eq!(type_byte, 8);
+        assert_eq!(type_byte, 5);
         assert_eq!(length, 15);
 
         let frame = Frame::Message { message: String::from("My test message") };
@@ -730,7 +753,7 @@ mod test {
         let (type_byte, length) = Frame::deserialize(&frame_tag);
 
         println!("type: {}, length: {}", type_byte, length);
-        assert_eq!(type_byte, 16);
+        assert_eq!(type_byte, 6);
         assert_eq!(length, 15);
     }
 
@@ -742,11 +765,18 @@ mod test {
         println!("{:?}", frame_bytes);
         assert_eq!(frame_bytes, vec![1, 0, 0, 0, 0]);
 
+        let frame = Frame::Lobby;
+        let frame_bytes = frame.as_bytes();
+
+        println!("{:?}", frame_bytes);
+        assert_eq!(frame_bytes, vec![2, 0, 0, 0, 0]);
+
         let frame = Frame::Join { chatroom_name: String::from("Test Chatroom 1") };
         let frame_bytes = frame.as_bytes();
 
         println!("{:?}", frame_bytes);
-        let mut res_bytes = vec![2, 15, 0, 0, 0];
+
+        let mut res_bytes = vec![3, 15, 0, 0, 0];
         res_bytes.extend_from_slice("Test Chatroom 1".as_bytes());
         assert_eq!(frame_bytes, res_bytes);
 
@@ -762,7 +792,7 @@ mod test {
         let frame_bytes = frame.as_bytes();
 
         println!("{:?}", frame_bytes);
-        let mut res_bytes = vec![8, 15, 0, 0, 0];
+        let mut res_bytes = vec![5, 15, 0, 0, 0];
         res_bytes.extend_from_slice("My new username".as_bytes());
         assert_eq!(frame_bytes, res_bytes);
 
@@ -770,7 +800,7 @@ mod test {
         let frame_bytes = frame.as_bytes();
 
         println!("{:?}", frame_bytes);
-        let mut res_bytes = vec![16, 15, 0, 0, 0];
+        let mut res_bytes = vec![6, 15, 0, 0, 0];
         res_bytes.extend_from_slice("My test message".as_bytes());
         assert_eq!(frame_bytes, res_bytes);
     }
@@ -782,6 +812,19 @@ mod test {
 
         // Test quit
         let frame = Frame::Quit;
+        let mut input_stream = Cursor::new(frame.as_bytes());
+
+        let parsed_frame_res = block_on(Frame::try_parse(&mut input_stream));
+
+        println!("{:?}", parsed_frame_res);
+        assert!(parsed_frame_res.is_ok());
+
+        let parsed_frame = parsed_frame_res.unwrap();
+
+        assert_eq!(frame, parsed_frame);
+
+        // Test quit
+        let frame = Frame::Lobby;
         let mut input_stream = Cursor::new(frame.as_bytes());
 
         let parsed_frame_res = block_on(Frame::try_parse(&mut input_stream));
