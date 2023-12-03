@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::server_error::ServerError;
 use rusty_chat::{*, Event, Null};
 
+
 mod chatroom_task;
 mod server_error;
 
@@ -291,7 +292,75 @@ pub struct Chatroom {
     num_clients: usize,
 }
 
-enum BrokerEvent {}
+impl Chatroom {
+    fn serialize_name_length(&self, tag: &mut [u8; 12]) {
+        let name_len = self.name.len();
+        for i in 0..4 {
+            tag[i] ^= ((name_len >> (i * 8)) & 0xff) as u8;
+        }
+    }
+
+    fn serialize_capacity(&self, tag: &mut [u8; 12]) {
+        for i in 4..8 {
+            tag[i] ^= ((self.capacity >> ((i % 4) * 8)) & 0xff) as u8;
+        }
+    }
+
+    fn serialize_num_clients(&self, tag: &mut [u8; 12]) {
+        for i in 8..12 {
+            tag[i] ^= ((self.num_clients >> ((i % 4) * 8)) & 0xff) as u8;
+        }
+    }
+}
+
+pub struct ChatroomEncodeTag([u8; 12]);
+
+impl SerializationTag for ChatroomEncodeTag {}
+
+pub struct ChatroomDecodeTag(u32, u32, u32);
+
+impl DeserializationTag for ChatroomDecodeTag {}
+
+impl SerAsBytes for Chatroom {
+    type Tag = ChatroomEncodeTag;
+
+    fn serialize(&self) -> Self::Tag {
+        let mut tag = [0u8; 12];
+        self.serialize_name_length(&mut tag);
+        self.serialize_capacity(&mut tag);
+        self.serialize_num_clients(&mut tag);
+        ChatroomEncodeTag(tag)
+    }
+}
+
+impl DeserAsBytes for Chatroom {
+    type TvlTag = ChatroomDecodeTag;
+
+    fn deserialize(tag: &Self::Tag) -> Self::TvlTag {
+        let inner = tag.0;
+        let mut name_len = 0;
+        for i in 0..4 {
+            name_len ^= (inner[i] as u32) << (i * 8);
+        }
+        let mut capacity = 0;
+        for i in 4..8 {
+            capacity ^= (inner[i] as u32) << ((i % 4) * 8);
+        }
+        let mut num_clients = 0;
+        for i in 8..12 {
+            num_clients ^= (inner[i] as u32) << ((i % 4) * 8);
+        }
+        ChatroomDecodeTag(name_len, capacity, num_clients)
+    }
+}
+
+impl AsBytes for Chatroom {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut bytes = self.serialize().0.to_vec();
+        bytes.extend_from_slice(self.name.as_bytes());
+        bytes
+    }
+}
 
 async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     // For keeping track of current clients
@@ -452,15 +521,17 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 println!("Logging that client {:?} has quit", peer_id);
             }
             Event::Create {peer_id, chatroom_name} => {
-                // Get client reference first, ensure client is a valid connected client
-                let mut client = clients.get_mut(&peer_id)
-                    .ok_or(ServerError::StateError(format!("no client with id {:?} contained in map", peer_id)))?;
-
-                // Check if chatroom_name is already in use, if so new chatroom cannot be created
-                if chatroom_names.contains(chatroom_name.as_str()) {
-                    client.main_broker_write_task_sender.send(Response::ChatroomAlreadyExists {chatroom_name}).await.map_err(|_e| ServerError::ConnectionFailed)?;
-                }
+                // // Get client reference first, ensure client is a valid connected client
+                // let mut client = clients.get_mut(&peer_id)
+                //     .ok_or(ServerError::StateError(format!("no client with id {:?} contained in map", peer_id)))?;
+                //
+                // // Check if chatroom_name is already in use, if so new chatroom cannot be created
+                // if chatroom_names.contains(chatroom_name.as_str()) {
+                //     client.main_broker_write_task_sender.send(Response::ChatroomAlreadyExists {chatroom_name}).await.map_err(|_e| ServerError::ConnectionFailed)?;
+                // }
+                todo!()
             }
+            _ => todo!()
         }
     }
 
