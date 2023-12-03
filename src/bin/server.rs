@@ -275,8 +275,8 @@ struct Client {
     id: Uuid,
     username: Option<String>,
     main_broker_write_task_sender: AsyncStdSender<Response>,
-    new_chatroom_broker_sender: AsyncStdSender<(TokioBroadcastReceiver<Response>, Response)>,
-
+    new_chatroom_connection_read_sender: AsyncStdSender<AsyncStdSender<Event>>,
+    new_chatroom_connection_write_sender: AsyncStdSender<(TokioBroadcastReceiver<Response>, Response)>,
     chatroom_broker_id: Option<Uuid>,
 }
 
@@ -315,7 +315,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
     let (_disconnected_sub_broker_sender, disconnected_sub_broker_receiver) = channel::unbounded::<(Uuid, AsyncStdSender<Event>, TokioBroadcastSender<Response>)>();
 
     // Fuse receivers
-    let mut event_receiver = event_receiver.fuse();
+    let mut client_event_receiver = event_receiver.fuse();
     let mut client_disconnection_receiver = client_disconnection_receiver.fuse();
     let mut client_exit_sub_broker_receiver = client_exit_sub_broker_receiver.fuse();
     let mut disconnected_sub_broker_receiver = disconnected_sub_broker_receiver.fuse();
@@ -328,13 +328,14 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
             // Listen for disconnecting clients
             disconnection = client_disconnection_receiver.next().fuse() => {
+
                 // Harvest the data sent by the client's disconnecting procedure and remove the client
-                let (peer_id, _client_responses, _client_messasges) = disconnection
+                let (peer_id, _client_response_channel, _client_chat_channel) = disconnection
                         .ok_or(ServerError::ChannelReceiveError(String::from("'client_disconnection_receiver' should send harvestable data")))?;
 
                 let mut removed_client = clients.remove(&peer_id).ok_or(ServerError::StateError(format!("client with peer id {} should exist in client map", peer_id)))?;
 
-
+                // Check if client had set their username
                 if let Some(username) = removed_client.username.as_ref() {
                     // Attempt to remove clients username from name set
                     if !client_usernames.remove(username.as_str()) {
@@ -391,7 +392,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
             }
 
             // Listen for events triggered by clients
-            event = event_receiver.next().fuse() => {
+            event = client_event_receiver.next().fuse() => {
                 match event {
                     Some(event) => event,
                     None => break,
@@ -402,8 +403,8 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
             event = client_exit_sub_broker_receiver.next().fuse() => {
                 let peer_id = event.map_or(
                     Err(ServerError::ChannelReceiveError(String::from("received 'None' from 'client_exit_sub_broker_receiver'"))),
-                    |e| -> Result<Uuid, ServerError> {
-                        match e {
+                    |ev| -> Result<Uuid, ServerError> {
+                        match ev {
                             Event::Quit {peer_id} => Ok(peer_id),
                             _ => Err(ServerError::ChannelReceiveError(String::from("received invalid 'Event' from 'client_exit_sub_broker_receiver'")))
                         }
@@ -413,14 +414,15 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 // Ensure we have a client with peer_id
                 let client = clients.get_mut(&peer_id).ok_or(ServerError::StateError(format!("client with id {} should exist in map", peer_id)))?;
 
+                // Take chatroom broker id from client, since client is exiting
                 let chatroom_broker_id = client.chatroom_broker_id
                         .take()
                         .ok_or(ServerError::StateError(format!("client with id {} should have not have 'chatroom_broker_id' set to 'None'", peer_id)))?;
 
-                // Take chatroom broker from map
+                // Take chatroom broker from map, for updating its state
                 let mut chatroom_broker = chatroom_brokers
-                .remove(&chatroom_broker_id)
-                .ok_or(ServerError::StateError(format!("chatroom sub-broker with id {} should exist in map", chatroom_broker_id)))?;
+                    .remove(&chatroom_broker_id)
+                    .ok_or(ServerError::StateError(format!("chatroom sub-broker with id {} should exist in map", chatroom_broker_id)))?;
 
                 // Decrement client count for the current broker
                 chatroom_broker.num_clients -= 1;
@@ -444,6 +446,11 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
             }
 
         };
+
+        // Now attempt to parse event and send a response
+        match event {
+            _ => todo!(),
+        }
     }
 
     todo!()
