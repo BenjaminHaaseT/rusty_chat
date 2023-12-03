@@ -11,6 +11,7 @@ use async_std::channel::{self, Sender, Receiver};
 use async_std::net::ToSocketAddrs;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::task;
+use tokio::sync::broadcast;
 
 use futures::{
     future::{Future, FutureExt,  FusedFuture, Fuse},
@@ -541,3 +542,45 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
 
 fn main() {todo!()}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_chatroom_serialize() {
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+
+        let chatroom = Chatroom {
+            id,
+            name: String::from("Test chatroom 666"),
+            client_subscriber:  broadcast_sender,
+            client_write_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let tag = chatroom.serialize().0;
+
+        println!("{:?}", tag);
+        assert_eq!(tag, [17, 0, 0, 0, 190, 18, 0, 0, 49, 9, 0, 0])
+    }
+
+    #[test]
+    fn test_chatroom_deserialize() {
+        todo!()
+    }
+
+    #[test]
+    fn test_chatroom_as_bytes() {
+        todo!()
+    }
+
+    #[test]
+    fn test_parse_chatroom() {
+        todo!()
+    }
+}
