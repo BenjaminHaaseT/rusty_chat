@@ -613,6 +613,9 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                         .map_err(|_| ServerError::ConnectionFailed)?;
                 }
             }
+            Event::Join {peer_id, chatroom_name} => {
+
+            }
             _ => todo!()
         }
     }
@@ -653,7 +656,7 @@ mod test {
 
         let chatroom = Chatroom {
             id,
-            name: String::from("Test chatroom 666"),
+            name: Arc::new(String::from("Test chatroom 666")),
             client_subscriber:  broadcast_sender,
             client_read_sender: chat_sender,
             shutdown: None,
@@ -672,7 +675,7 @@ mod test {
         let id = Uuid::new_v4();
         let (broadcast_sender, _) = broadcast::channel::<Response>(1);
         let (chat_sender, _) = channel::unbounded::<Event>();
-        let name = String::from("Test chatroom 666");
+        let name = Arc::new(String::from("Test chatroom 666"));
 
         let chatroom = Chatroom {
             id,
@@ -698,7 +701,7 @@ mod test {
         let id = Uuid::new_v4();
         let (broadcast_sender, _) = broadcast::channel::<Response>(1);
         let (chat_sender, _) = channel::unbounded::<Event>();
-        let name = String::from("Test chatroom 666");
+        let name = Arc::new(String::from("Test chatroom 666"));
 
         let chatroom = Chatroom {
             id,
