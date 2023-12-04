@@ -542,11 +542,12 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 // Check if chatroom_name is already in use, if so new chatroom cannot be created
                 let chatroom_name_clone = chatroom_name.clone();
                 let chatroom_name = Arc::new(chatroom_name);
+
                 if chatroom_names.contains(&chatroom_name) {
                     let lobby_state = create_lobby_state(&mut chatroom_brokers);
                     client.main_broker_write_task_sender.send(
                         Response::ChatroomAlreadyExists {
-                            chatroom_name: Arc::into_inner(chatroom_name).ok_or(ServerError::StateError("chatroom_name should have only one strong reference".to_string()))?,
+                            chatroom_name: chatroom_name_clone,
                             lobby_state,
                         })
                         .await
