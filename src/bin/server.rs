@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
+
 // use std::
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -275,7 +276,7 @@ async fn client_write_loop(
 #[derive(Debug)]
 struct Client {
     id: Uuid,
-    username: Option<String>,
+    username: Option<Arc<String>>,
     main_broker_write_task_sender: AsyncStdSender<Response>,
     new_chatroom_connection_read_sender: AsyncStdSender<AsyncStdSender<Event>>,
     new_chatroom_connection_write_sender: AsyncStdSender<(TokioBroadcastReceiver<Response>, Response)>,
@@ -285,7 +286,7 @@ struct Client {
 #[derive(Debug)]
 pub struct Chatroom {
     id: Uuid,
-    name: String,
+    name: Arc<String>,
     client_subscriber: TokioBroadcastSender<Response>,
     client_read_sender: AsyncStdSender<Event>,
     shutdown: Option<AsyncStdSender<Null>>,
@@ -368,7 +369,7 @@ impl AsBytes for Chatroom {
 async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     // For keeping track of current clients
     let mut clients: HashMap<Uuid, Client> = HashMap::new();
-    let mut client_usernames: HashSet<String> = HashSet::new();
+    let mut client_usernames: HashSet<Arc<String>> = HashSet::new();
 
     // Channel for harvesting disconnected clients
     let (
@@ -378,7 +379,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
     // For keeping track of chatroom sub-broker tasks
     let mut chatroom_brokers: HashMap<Uuid, Chatroom> = HashMap::new();
-    let mut chatroom_names : HashSet<String> = HashSet::new();
+    let mut chatroom_names : HashSet<Arc<String>> = HashSet::new();
 
     // Channel for communicating with chatroom-sub-broker tasks, used exclusively for an exiting client
     let (client_exit_sub_broker_sender, client_exit_sub_broker_receiver) = channel::unbounded::<Event>();
@@ -539,11 +540,13 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 }
 
                 // Check if chatroom_name is already in use, if so new chatroom cannot be created
+                let chatroom_name_clone = chatroom_name.clone();
+                let chatroom_name = Arc::new(chatroom_name);
                 if chatroom_names.contains(&chatroom_name) {
                     let lobby_state = create_lobby_state(&mut chatroom_brokers);
                     client.main_broker_write_task_sender.send(
                         Response::ChatroomAlreadyExists {
-                            chatroom_name,
+                            chatroom_name: Arc::into_inner(chatroom_name).ok_or(ServerError::StateError("chatroom_name should have only one strong reference".to_string()))?,
                             lobby_state,
                         })
                         .await
@@ -573,7 +576,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
                     // Ensure that the lifetime of chatroom name does not exceed lifetime of chatroom
                     chatroom_brokers.insert(id, chatroom);
-                    chatroom_names.insert(chatroom_brokers[&id].name.clone());
+                    chatroom_names.insert(chatroom_name.clone());
 
                     // Clone channel senders for moving into a new task
                     let mut disconnection_sender_clone = disconnected_sub_broker_sender.clone();
@@ -601,7 +604,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                         .await
                         .map_err(|_| ServerError::ConnectionFailed)?;
 
-                    let response = Response::ChatroomCreated {chatroom_name};
+                    let response = Response::ChatroomCreated {chatroom_name: chatroom_name_clone};
 
                     // Send client's write task a new subscription for receiving responses from the chatroom broker task
                     client.new_chatroom_connection_write_sender.send((broadcast_sender.subscribe(), response))
