@@ -379,7 +379,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
     // For keeping track of chatroom sub-broker tasks
     let mut chatroom_brokers: HashMap<Uuid, Chatroom> = HashMap::new();
-    let mut chatroom_names : HashSet<Arc<String>> = HashSet::new();
+    let mut chatroom_name_to_id : HashMap<Arc<String>, Uuid> = HashMap::new();
 
     // Channel for communicating with chatroom-sub-broker tasks, used exclusively for an exiting client
     let (client_exit_sub_broker_sender, client_exit_sub_broker_receiver) = channel::unbounded::<Event>();
@@ -432,7 +432,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                     // do not place broker back into map
                     if chatroom_broker.num_clients == 0 {
                         // Attempt to remove name from  name map
-                        if !chatroom_names.remove(&chatroom_broker.name) {
+                        if chatroom_name_to_id.remove(&chatroom_broker.name).is_none() {
                             return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
                         }
                         // Attempt to send shutdown signal
@@ -502,7 +502,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
                 // Check if we need to initiate a shutdown for the current sub-broker
                 if chatroom_broker.num_clients == 0 {
-                    if !chatroom_names.remove(&chatroom_broker.name) {
+                    if chatroom_name_to_id.remove(&chatroom_broker.name).is_none() {
                         return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
                     }
                     match chatroom_broker.shutdown.take() {
@@ -543,7 +543,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 let chatroom_name_clone = chatroom_name.clone();
                 let chatroom_name = Arc::new(chatroom_name);
 
-                if chatroom_names.contains(&chatroom_name) {
+                if chatroom_name_to_id.contains_key(&chatroom_name) {
                     let lobby_state = create_lobby_state(&mut chatroom_brokers);
                     client.main_broker_write_task_sender.send(
                         Response::ChatroomAlreadyExists {
@@ -577,7 +577,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
                     // Ensure that the lifetime of chatroom name does not exceed lifetime of chatroom
                     chatroom_brokers.insert(id, chatroom);
-                    chatroom_names.insert(chatroom_name.clone());
+                    chatroom_name_to_id.insert(chatroom_name.clone(), id);
 
                     // Clone channel senders for moving into a new task
                     let mut disconnection_sender_clone = disconnected_sub_broker_sender.clone();
@@ -614,7 +614,21 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 }
             }
             Event::Join {peer_id, chatroom_name} => {
+                let mut client = clients.
+                    get_mut(&peer_id)
+                    .ok_or(ServerError::StateError(format!("client with id {} not contained in map", peer_id)))?;
+                // Ensure same invariants for Event::Create handler also hold i.e.
+                // client has set username and does not have broker id set
+                if client.username.is_none() {
+                    return Err(ServerError::IllegalEvent(format!("client with id {} attempted to join a chatroom without having username set", peer_id)));
+                }
+                if client.chatroom_broker_id.is_some() {
+                    return Err(ServerError::IllegalEvent(format!("client with id {} attempted to join a chatroom while already inside a chatroom", peer_id)));
+                }
 
+                // let mut chatroom = chatroom_brokers.get_mut(&)
+                // TODO: need to map from chatroom names to chatroom id's
+                todo!()
             }
             _ => todo!()
         }
