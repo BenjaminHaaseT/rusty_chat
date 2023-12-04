@@ -16,6 +16,7 @@ pub enum ServerError {
     SubscriptionError(&'static str),
     StateError(String),
     ChannelReceiveError(String),
+    IllegalEvent(String),
 }
 
 impl Display for ServerError {
@@ -26,6 +27,7 @@ impl Display for ServerError {
             ServerError::SubscriptionError(s) => write!(f, "error from subscription stream: {s}"),
             ServerError::StateError(s) => write!(f, "state error in server: {s}"),
             ServerError::ChannelReceiveError(s) => write!(f, "error receiving from channel: {s}"),
+            ServerError::IllegalEvent(s) => write!(f, "illegal event in server: {s}"),
         }
     }
 }

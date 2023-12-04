@@ -287,7 +287,7 @@ pub struct Chatroom {
     id: Uuid,
     name: String,
     client_subscriber: TokioBroadcastSender<Response>,
-    client_write_sender: AsyncStdSender<Event>,
+    client_read_sender: AsyncStdSender<Event>,
     shutdown: Option<AsyncStdSender<Null>>,
     capacity: usize,
     num_clients: usize,
@@ -314,10 +314,12 @@ impl Chatroom {
     }
 }
 
+#[derive(Debug)]
 pub struct ChatroomEncodeTag([u8; 12]);
 
 impl SerializationTag for ChatroomEncodeTag {}
 
+#[derive(Debug)]
 pub struct ChatroomDecodeTag(u32, u32, u32);
 
 impl DeserializationTag for ChatroomDecodeTag {}
@@ -366,7 +368,7 @@ impl AsBytes for Chatroom {
 async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     // For keeping track of current clients
     let mut clients: HashMap<Uuid, Client> = HashMap::new();
-    let mut client_usernames: HashSet<&str> = HashSet::new();
+    let mut client_usernames: HashSet<String> = HashSet::new();
 
     // Channel for harvesting disconnected clients
     let (
@@ -376,13 +378,13 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
     // For keeping track of chatroom sub-broker tasks
     let mut chatroom_brokers: HashMap<Uuid, Chatroom> = HashMap::new();
-    let mut chatroom_names : HashSet<&str> = HashSet::new();
+    let mut chatroom_names : HashSet<String> = HashSet::new();
 
     // Channel for communicating with chatroom-sub-broker tasks, used exclusively for an exiting client
     let (client_exit_sub_broker_sender, client_exit_sub_broker_receiver) = channel::unbounded::<Event>();
 
     // Channel for harvesting disconnected chatroom-sub-broker tasks
-    let (_disconnected_sub_broker_sender, disconnected_sub_broker_receiver) = channel::unbounded::<(Uuid, AsyncStdSender<Event>, TokioBroadcastSender<Response>)>();
+    let (disconnected_sub_broker_sender, disconnected_sub_broker_receiver) = channel::unbounded::<(Uuid, AsyncStdReceiver<Event>, TokioBroadcastSender<Response>)>();
 
     // Fuse receivers
     let mut client_event_receiver = event_receiver.fuse();
@@ -408,7 +410,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 // Check if client had set their username
                 if let Some(username) = removed_client.username.as_ref() {
                     // Attempt to remove clients username from name set
-                    if !client_usernames.remove(username.as_str()) {
+                    if !client_usernames.remove(username) {
                         return Err(ServerError::StateError(format!("client username {} should exist in set", username)));
                     }
                 }
@@ -429,8 +431,8 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                     // do not place broker back into map
                     if chatroom_broker.num_clients == 0 {
                         // Attempt to remove name from  name map
-                        if !chatroom_names.remove(chatroom_broker.name.as_str()) {
-                            return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name.as_str())));
+                        if !chatroom_names.remove(&chatroom_broker.name) {
+                            return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
                         }
                         // Attempt to send shutdown signal
                         match chatroom_broker.shutdown.take() {
@@ -499,7 +501,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
 
                 // Check if we need to initiate a shutdown for the current sub-broker
                 if chatroom_broker.num_clients == 0 {
-                    if !chatroom_names.remove(chatroom_broker.name.as_str()) {
+                    if !chatroom_names.remove(&chatroom_broker.name) {
                         return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
                     }
                     match chatroom_broker.shutdown.take() {
@@ -522,15 +524,90 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 println!("Logging that client {:?} has quit", peer_id);
             }
             Event::Create {peer_id, chatroom_name} => {
-                // // Get client reference first, ensure client is a valid connected client
-                // let mut client = clients.get_mut(&peer_id)
-                //     .ok_or(ServerError::StateError(format!("no client with id {:?} contained in map", peer_id)))?;
-                //
-                // // Check if chatroom_name is already in use, if so new chatroom cannot be created
-                // if chatroom_names.contains(chatroom_name.as_str()) {
-                //     client.main_broker_write_task_sender.send(Response::ChatroomAlreadyExists {chatroom_name}).await.map_err(|_e| ServerError::ConnectionFailed)?;
-                // }
-                todo!()
+                // Get client reference first, ensure client is a valid connected client
+                let mut client = clients.get_mut(&peer_id)
+                    .ok_or(ServerError::StateError(format!("no client with id {:?} contained in map", peer_id)))?;
+
+                // Ensure two invariants about state of client, 1) client has username set and 2)
+                // client has no existing chatroom broker id set, neither of these states should occur,
+                // therefore if they do occur, the program should terminate
+                if client.username.is_none() {
+                    return Err(ServerError::IllegalEvent(format!("client with id {} attempted to create a new chatroom without having a valid username set", client.id)));
+                }
+                if client.chatroom_broker_id.is_some() {
+                    return Err(ServerError::IllegalEvent(format!("client with id {} already has field 'chatroom_broker_id' set", client.id)));
+                }
+
+                // Check if chatroom_name is already in use, if so new chatroom cannot be created
+                if chatroom_names.contains(&chatroom_name) {
+                    let lobby_state = create_lobby_state(&mut chatroom_brokers);
+                    client.main_broker_write_task_sender.send(
+                        Response::ChatroomAlreadyExists {
+                            chatroom_name,
+                            lobby_state,
+                        })
+                        .await
+                        .map_err(|_e| ServerError::ConnectionFailed)?;
+                } else {
+                    // Otherwise we can create the chatroom
+                    let id = Uuid::new_v4();
+
+                    // Channel for client subscriptions i.e from chatroom broker to client write tasks
+                    // TODO: Set capacity has a parameter
+                    let (mut broadcast_sender, broadcast_receiver) = broadcast::channel::<Response>(100);
+
+                    // Channel for client sending i.e from client read tasks to chatroom broker
+                    // TODO: add capacity to avoid overflow of messages received
+                    let (client_sender, mut client_receiver) = channel::unbounded::<Event>();
+                    let (shutdown_sender, shutdown_receiver) = channel::unbounded::<Null>();
+
+                    let chatroom = Chatroom {
+                        id,
+                        name: chatroom_name.clone(),
+                        client_subscriber: broadcast_sender.clone(),
+                        client_read_sender: client_sender.clone(),
+                        shutdown: Some(shutdown_sender),
+                        capacity: 1000,
+                        num_clients: 1
+                    };
+
+                    // Ensure that the lifetime of chatroom name does not exceed lifetime of chatroom
+                    chatroom_brokers.insert(id, chatroom);
+                    chatroom_names.insert(chatroom_brokers[&id].name.clone());
+
+                    // Clone channel senders for moving into a new task
+                    let mut disconnection_sender_clone = disconnected_sub_broker_sender.clone();
+                    let mut broadcast_sender_clone = broadcast_sender.clone();
+
+                    // Spawn chatroom broker task
+                    let chatroom_handle = task::spawn(async move {
+                        let res = chatroom_broker(&mut client_receiver, &mut broadcast_sender_clone, shutdown_receiver).await;
+                        if let Err(ref e) = res {
+                            // TODO: add logging/tracing
+                            eprintln!("error occurred inside chatroom broker task with id {}", id);
+                            eprintln!("{e}");
+                        }
+                        disconnection_sender_clone.send((id, client_receiver, broadcast_sender_clone))
+                            .await
+                            .map_err(|_| ServerError::ConnectionFailed)?;
+                        res
+                    });
+
+                    // Update client's broker_id
+                    client.chatroom_broker_id = Some(id);
+
+                    // Send the sending half the client-read-task to chatroom broker task channel to the client
+                    client.new_chatroom_connection_read_sender.send(client_sender)
+                        .await
+                        .map_err(|_| ServerError::ConnectionFailed)?;
+
+                    let response = Response::ChatroomCreated {chatroom_name};
+
+                    // Send client's write task a new subscription for receiving responses from the chatroom broker task
+                    client.new_chatroom_connection_write_sender.send((broadcast_sender.subscribe(), response))
+                        .await
+                        .map_err(|_| ServerError::ConnectionFailed)?;
+                }
             }
             _ => todo!()
         }
@@ -539,6 +616,23 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
     todo!()
 }
 
+async fn chatroom_broker(
+    events: &mut AsyncStdReceiver<Event>,
+    broadcast_sender: &mut TokioBroadcastSender<Response>,
+    shutdown_receiver: AsyncStdReceiver<Null>,
+    // disconnection_sender: AsyncStdSender<(Uuid, AsyncStdReceiver<Event>, TokioBroadcastSender<Response>)>
+) -> Result<(), ServerError> {
+
+    todo!()
+}
+
+fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
+    let mut lobby_state = vec![];
+    for (_, chatroom) in chatroom_brokers {
+        lobby_state.append(&mut chatroom.as_bytes());
+    }
+    lobby_state
+}
 
 
 fn main() {todo!()}
@@ -557,7 +651,7 @@ mod test {
             id,
             name: String::from("Test chatroom 666"),
             client_subscriber:  broadcast_sender,
-            client_write_sender: chat_sender,
+            client_read_sender: chat_sender,
             shutdown: None,
             capacity: 4798,
             num_clients: 2353,
@@ -571,16 +665,54 @@ mod test {
 
     #[test]
     fn test_chatroom_deserialize() {
-        todo!()
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+        let name = String::from("Test chatroom 666");
+
+        let chatroom = Chatroom {
+            id,
+            name: name.clone(),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let tag = chatroom.serialize();
+        let decode_tag = Chatroom::deserialize(&tag);
+
+        println!("{:?}", decode_tag);
+        assert_eq!(decode_tag.0, name.len() as u32);
+        assert_eq!(decode_tag.1, 4798);
+        assert_eq!(decode_tag.2, 2353);
     }
 
     #[test]
     fn test_chatroom_as_bytes() {
-        todo!()
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+        let name = String::from("Test chatroom 666");
+
+        let chatroom = Chatroom {
+            id,
+            name: name.clone(),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let chatroom_bytes = chatroom.as_bytes();
+        println!("{:?}", chatroom_bytes);
+
+        let mut expected_bytes = chatroom.serialize().0.to_vec();
+        expected_bytes.extend_from_slice(name.as_bytes());
+
+        assert_eq!(chatroom_bytes, expected_bytes);
     }
 
-    #[test]
-    fn test_parse_chatroom() {
-        todo!()
-    }
 }
