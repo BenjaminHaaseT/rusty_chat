@@ -804,8 +804,28 @@ async fn chatroom_broker(
     shutdown_receiver: AsyncStdReceiver<Null>,
     // disconnection_sender: AsyncStdSender<(Uuid, AsyncStdReceiver<Event>, TokioBroadcastSender<Response>)>
 ) -> Result<(), ServerError> {
-
-    todo!()
+    // Fuse receivers for select loop
+    let mut events = events.fuse();
+    let mut shutdown_receiver = shutdown_receiver.fuse();
+    loop {
+        let response = select! {
+            event = events.select_next_some().fuse() => {
+                match event {
+                    Event::Quit {peer_id} => {
+                        client_exit.send(Event::Quit { peer_id })
+                        .await
+                        .map_err(|_| ServerError::ConnectionFailed)?;
+                        continue;
+                    }
+                    // Event::Message {message, peer_id} => Response::Message {msg: message}
+                    _ => todo!(),
+                }
+            },
+            shutdown = shutdown_receiver.next().fuse() => {
+                todo!();
+            }
+        };
+    }
 }
 
 fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
