@@ -807,6 +807,7 @@ async fn chatroom_broker(
     // Fuse receivers for select loop
     let mut events = events.fuse();
     let mut shutdown_receiver = shutdown_receiver.fuse();
+
     loop {
         let response = select! {
             event = events.select_next_some().fuse() => {
@@ -817,15 +818,27 @@ async fn chatroom_broker(
                         .map_err(|_| ServerError::ConnectionFailed)?;
                         continue;
                     }
-                    // Event::Message {message, peer_id} => Response::Message {msg: message}
-                    _ => todo!(),
+                    Event::Message {message, peer_id} => Response::Message {peer_id, msg: message},
+                    _ => return Err(ServerError::IllegalEvent(format!("received illegal event, should only receive messages and quit events"))),
                 }
             },
             shutdown = shutdown_receiver.next().fuse() => {
-                todo!();
+                match shutdown {
+                    Some(null) => match null {}
+                    None => break,
+                }
             }
         };
+
+        // TODO: task may block, maybe use a different approach, repeated clones may be expensive
+        let mut sender_clone = broadcast_sender.clone();
+        task::spawn_blocking(move || {
+            sender_clone.send(response).map_err(|_| ServerError::ConnectionFailed)
+        }).await?;
+
     }
+
+    Ok(())
 }
 
 fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
