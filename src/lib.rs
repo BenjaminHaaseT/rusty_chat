@@ -40,7 +40,7 @@ pub enum Response {
     ChatroomFull {chatroom_name: String, lobby_state: Vec<u8>},
 
     /// A response that sends a message to the client from the chatroom
-    Message { peer_id: Uuid, username: String, msg: String },
+    Message { peer_id: Uuid, msg: String },
 
     /// A response informing the client they have successfully created a valid username
     UsernameOk { username: String, lobby_state: Vec<u8> },
@@ -135,19 +135,19 @@ impl Response {
             Ok(Response::ChatroomFull {chatroom_name, lobby_state: lobby_state_bytes})
 
         } else if type_byte ^ 7 == 0 {
-            let mut username_bytes = vec![0; name_len as usize];
+            // let mut username_bytes = vec![0; name_len as usize];
             let mut msg_bytes = vec![0; data_len as usize];
-            input_reader.read_exact(username_bytes.as_mut_slice())
-                .await
-                .map_err(|_| "unable to read username bytes from reader")?;
+            // input_reader.read_exact(username_bytes.as_mut_slice())
+            //     .await
+            //     .map_err(|_| "unable to read username bytes from reader")?;
             input_reader.read_exact(msg_bytes.as_mut_slice())
                 .await
                 .map_err(|_| "unable to read message bytes from reader")?;
-            let username = String::from_utf8(username_bytes)
-                .map_err(|_| "unable to parse username bytes as valid utf8")?;
+            // let username = String::from_utf8(username_bytes)
+            //     .map_err(|_| "unable to parse username bytes as valid utf8")?;
             let msg = String::from_utf8(msg_bytes)
                 .map_err(|_| "unable to parse message as valid utf8")?;
-            Ok(Response::Message {peer_id: Uuid::from_u128(id), username, msg})
+            Ok(Response::Message {peer_id: Uuid::from_u128(id), msg})
 
         } else if type_byte ^ 8 == 0 {
             let mut username_bytes = vec![0; name_len as usize];
@@ -282,12 +282,12 @@ impl SerAsBytes for Response {
                 Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
                 Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
             }
-            Response::Message {peer_id, username, msg} => {
+            Response::Message {peer_id,  msg} => {
                 bytes[0] ^= 7;
                 let peer_id_bytes = peer_id.as_bytes();
                 bytes[1..17].copy_from_slice(peer_id_bytes);
-                Response::serialize_length(&mut bytes, 17, username.len() as u32);
-                Response::serialize_length(&mut bytes, 21, msg.len() as u32);
+                // Response::serialize_length(&mut bytes, 17, username.len() as u32);
+                Response::serialize_length(&mut bytes, 17, msg.len() as u32);
             }
             Response::UsernameOk {username, lobby_state} => {
                 bytes[0] ^= 8;
@@ -343,8 +343,8 @@ impl DeserAsBytes for Response {
             let mut id_bytes = [0u8; 16];
             id_bytes.copy_from_slice(&tag[1..17]);
             let id = Uuid::from_bytes(id_bytes).as_u128();
-            Response::deserialize_length(tag, 17, &mut name_len);
-            Response::deserialize_length(tag, 21, &mut data_len);
+            // Response::deserialize_length(tag, 17, &mut name_len);
+            Response::deserialize_length(tag, 17, &mut data_len);
             (7, id, name_len, data_len)
         } else if type_byte ^ 8 == 0 {
             Response::deserialize_length(tag, 1, &mut name_len);
@@ -387,8 +387,8 @@ impl AsBytes for Response {
                 bytes.extend_from_slice(chatroom_name.as_bytes());
                 bytes.extend_from_slice(lobby_state.as_slice());
             }
-            Response::Message {peer_id, username,msg} => {
-                bytes.extend_from_slice(username.as_bytes());
+            Response::Message {peer_id,msg} => {
+                // bytes.extend_from_slice(username.as_bytes());
                 bytes.extend_from_slice(msg.as_bytes());
             }
             Response::UsernameOk {username, lobby_state} => {
@@ -929,13 +929,13 @@ mod test {
 
         // Test Message
         let peer_id = Uuid::new_v4();
-        let response = Response::Message { peer_id, username: String::from("Good Username"), msg: String::from("Test message") };
+        let response = Response::Message { peer_id,  msg: String::from("Test message") };
         let tag = response.serialize();
         println!("{:?}", tag);
         let mut expected_tag = [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_tag[1..17].copy_from_slice(peer_id.as_bytes());
-        expected_tag[17] = 13;
-        expected_tag[21] = 12;
+        // expected_tag[17] = 13;
+        expected_tag[17] = 12;
         assert_eq!(tag, expected_tag);
 
         // Test UsernameOk
@@ -1033,13 +1033,13 @@ mod test {
 
         // Test Message
         let peer_id = Uuid::new_v4();
-        let response = Response::Message {peer_id, username: String::from("A good test username"), msg: String::from("A good test message") };
+        let response = Response::Message {peer_id, msg: String::from("A good test message") };
         let tag = response.serialize();
         let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
         println!("{:?}", (type_byte, id, name_len, data_len));
         assert_eq!(type_byte, 7);
         assert_eq!(id, peer_id.as_u128());
-        assert_eq!(name_len, 20);
+        assert_eq!(name_len, 0);
         assert_eq!(data_len, 19);
 
         // Test UsernameOk
@@ -1146,15 +1146,15 @@ mod test {
 
         // Test Message
         let peer_id = Uuid::new_v4();
-        let response = Response::Message { peer_id, username: String::from("A good test username"), msg: String::from("Hello World!")};
+        let response = Response::Message { peer_id,  msg: String::from("Hello World!")};
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
         let mut expected_bytes = vec![0; 25];
         expected_bytes[0] = 7;
         expected_bytes[1..17].copy_from_slice(peer_id.as_bytes());
-        expected_bytes[17] = 20;
-        expected_bytes[21] = 12;
-        expected_bytes.extend_from_slice(String::from("A good test username").as_bytes());
+        expected_bytes[17] = 12;
+        // expected_bytes[21] = 12;
+        // expected_bytes.extend_from_slice(String::from("A good test username").as_bytes());
         expected_bytes.extend_from_slice(String::from("Hello World!").as_bytes());
         assert_eq!(response_bytes, expected_bytes);
 
@@ -1273,9 +1273,9 @@ mod test {
 
         // Test Message
         let peer_id = Uuid::new_v4();
-        let username = String::from("A good test username");
+        // let username = String::from("A good test username");
         let msg = String::from("A good test message");
-        let response = Response::Message {peer_id, username, msg};
+        let response = Response::Message {peer_id,  msg};
         let mut input_reader = Cursor::new(response.as_bytes());
 
         let parsed_response_res = block_on(Response::try_parse(&mut input_reader));
