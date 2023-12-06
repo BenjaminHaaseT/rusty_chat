@@ -42,7 +42,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
     let (broker_sender, broker_receiver) = channel::bounded::<Event>(channel_buf_size);
 
     // spawn broker task
-    task::spawn(broker(broker_sender.clone(),broker_receiver));
+    task::spawn(broker(broker_receiver));
 
     while let Some(stream) = listener.incoming().next().await {
         let stream = stream.map_err(|_| ServerError::ConnectionFailed)?;
@@ -366,7 +366,7 @@ impl AsBytes for Chatroom {
     }
 }
 
-async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -> Result<(), ServerError> {
+async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     // For keeping track of current clients
     let mut clients: HashMap<Uuid, Client> = HashMap::new();
     let mut client_usernames: HashSet<Arc<String>> = HashSet::new();
@@ -539,8 +539,8 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                     .ok_or(ServerError::StateError(format!("no client with id {:?} contained in client map", peer_id)))?;
 
                 // Ensure two invariants about state of client, 1) client has username set and 2)
-                // client has no existing chatroom broker id set, neither of these states should occur,
-                // therefore if they do occur, the program should terminate
+                // client has no existing chatroom broker id set, client should be in neither of these states,
+                // therefore if the client is, the program should terminate
                 if client.username.is_none() {
                     return Err(ServerError::IllegalEvent(format!("client with id {} attempted to create a new chatroom without having a valid username set", client.id)));
                 }
@@ -572,9 +572,12 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                     // Channel for client sending i.e from client read tasks to chatroom broker
                     // TODO: add capacity to avoid overflow of messages received
                     let (client_sender, mut client_receiver) = channel::unbounded::<Event>();
+
+                    // Chanel for synchronizing shutdown signal with main broker, chatroom gets receiving end
+                    // so it can be shutdown by the main broker
                     let (shutdown_sender, shutdown_receiver) = channel::unbounded::<Null>();
 
-                    // Clone channel for exiting clients
+                    // Clone channel for exiting clients from the chatroom
                     let mut client_exit_clone = client_exit_sub_broker_sender.clone();
 
                     let chatroom = Chatroom {
@@ -591,8 +594,10 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                     chatroom_brokers.insert(id, chatroom);
                     chatroom_name_to_id.insert(chatroom_name.clone(), id);
 
-                    // Clone channel senders for moving into a new task
+                    // Clone channel sender for moving into a new task, for sending back channel connections when chatroom is finished
                     let mut disconnection_sender_clone = disconnected_sub_broker_sender.clone();
+
+                    // Clone channel for subscriptions
                     let mut broadcast_sender_clone = broadcast_sender.clone();
 
                     // Spawn chatroom broker task
@@ -612,7 +617,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                     // Update client's broker_id
                     client.chatroom_broker_id = Some(id);
 
-                    // Send the sending half the client-read-task to chatroom broker task channel to the client
+                    // Send the sending half of chatroom-broker-to-client-read channel to the client's read task
                     client.new_chatroom_connection_read_sender.send(client_sender)
                         .await
                         .map_err(|_| ServerError::ConnectionFailed)?;
@@ -629,6 +634,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 let mut client = clients.
                     get_mut(&peer_id)
                     .ok_or(ServerError::StateError(format!("client with id {} not contained in map", peer_id)))?;
+
                 // Ensure same invariants for Event::Create handler also hold i.e.
                 // client has set username and does not have broker id set
                 if client.username.is_none() {
@@ -657,6 +663,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                         let mut chatroom = chatroom_brokers
                             .get_mut(&chatroom_id)
                             .ok_or(ServerError::StateError(format!("chatroom with id {} and name {} should exist in chatroom map", chatroom_id, chatroom_name)))?;
+
                         chatroom.num_clients += 1;
 
                         // For sending to client's write/read tasks respectively
@@ -691,6 +698,7 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 // Get client from map
                 let mut client = clients.get_mut(&peer_id)
                     .ok_or(ServerError::StateError(format!("client with id {} should exist in client map", peer_id)))?;
+
                 // Ensure username for the current client is not set
                 if client.username.is_some() {
                     return Err(ServerError::IllegalEvent(format!("client with id {} requested to change username while already having username set", peer_id)));
@@ -767,11 +775,26 @@ async fn broker(_event_sender: Sender<Event>, event_receiver: Receiver<Event>) -
                 // Insert new client into state
                 clients.insert(peer_id, client);
             }
-            _ => todo!()
+            Event::Message {ref message, peer_id} => panic!("unexpected event received from client {}", peer_id),
         }
     }
 
-    todo!()
+    // Once we reach here we know there are no more client's sending events, and we can drain the
+    // client disconnection channel
+    while let Some((_peer_id, _client_response_channel, _client_message_channel)) = client_disconnection_receiver.next().await {}
+
+
+    for (_, mut chatroom) in chatroom_brokers {
+        if let Some(shutdown) = chatroom.shutdown.take() {
+            // Check if we need to initiate shutdown for any chatroom broker
+            drop(shutdown);
+        }
+    }
+
+    // Now drain the chatroom sub-broker disconnection receiver
+    while let Some((_chatroom_id, _sub_broker_events, _sub_broker_client_exits, _sub_broker_messages)) = disconnected_sub_broker_receiver.next().await {}
+
+    Ok(())
 }
 
 async fn chatroom_broker(
