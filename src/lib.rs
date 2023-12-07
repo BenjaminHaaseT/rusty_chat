@@ -66,7 +66,7 @@ impl Response {
     /// If an invalid type flag is read form `input_reader`, the method will panic.
     pub async fn try_parse<R: AsyncReadExt + Unpin>(mut input_reader: R) -> Result<Self, &'static str> {
         // Create tag, and attempt to read from reader
-        let mut tag = [0u8; 25];
+        let mut tag = [0u8; 22];
         input_reader.read_exact(&mut tag)
             .await
             .map_err(|_| "unable to read tag from reader")?;
@@ -221,6 +221,19 @@ impl Response {
         }
     }
 
+    // /// Helper method to reduce code duplication when serializing a `Response`
+    // ///
+    // /// Many `Response` variants have fields which have a length property that needs to be serialized.
+    // /// This method provides the functionality to do this.
+    // /// Takes `tag`, the tag that we are serializing the `Response` into, `idx` the starting position
+    // /// from which to start serializing a length value and `length`, the value that represents the length
+    // /// we wish to serialize
+    // fn serialize_name_length(tag: &mut ResponseEncodeTag, idx: usize, length: u8) {
+    //     for i in idx ..idx + 4 {
+    //         tag[i] ^= (length >> ((i - idx) * 8)) as u8;
+    //     }
+    // }
+
     /// Helper method to reduce code duplication when serializing a `Response`
     ///
     /// Many `Response` variants have fields which have a length property that needs to be serialized.
@@ -228,7 +241,7 @@ impl Response {
     /// Takes `tag`, the tag that we are serializing the `Response` into, `idx` the starting position
     /// from which to start serializing a length value and `length`, the value that represents the length
     /// we wish to serialize
-    fn serialize_length(tag: &mut ResponseEncodeTag, idx: usize, length: u32) {
+    fn serialize_data_length(tag: &mut ResponseEncodeTag, idx: usize, length: u32) {
         for i in idx ..idx + 4 {
             tag[i] ^= (length >> ((i - idx) * 8)) as u8;
         }
@@ -240,7 +253,7 @@ impl Response {
     /// This method provides the functionality to do this.
     /// Takes `tag`, the tag that we are deserializing `length` from, and the starting index `idx`,
     /// that is the position in the `tag` we should start deserializing bytes from.
-    fn deserialize_length(tag: &ResponseEncodeTag, idx: usize, length: &mut u32) {
+    fn deserialize_data_length(tag: &ResponseEncodeTag, idx: usize, length: &mut u32) {
         for i in idx ..idx + 4 {
             *length ^= (tag[i] as u32) << ((i - idx) * 8)
         }
@@ -250,12 +263,12 @@ impl Response {
 unsafe impl Send for Response {}
 
 /// The type-length-value tag type for serializing a `Response`
-type ResponseEncodeTag = [u8; 25];
+type ResponseEncodeTag = [u8; 22];
 
 impl SerializationTag for ResponseEncodeTag {}
 
 /// The type-length-value type for deserializing a `Response
-type ResponseDecodeTag = (u8, u128, u32, u32);
+type ResponseDecodeTag = (u8, u128, u8, u32);
 
 impl DeserializationTag for ResponseDecodeTag {}
 
@@ -263,55 +276,63 @@ impl SerAsBytes for Response {
     type Tag = ResponseEncodeTag;
 
     fn serialize(&self) -> Self::Tag {
-        let mut bytes = [0u8; 25];
+        let mut bytes = [0u8; 22];
         match self {
             Response::ConnectionOk => bytes[0] ^= 1,
             Response::Subscribed {chatroom_name} => {
                 bytes[0] ^= 2;
-                Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                bytes[1] ^= chatroom_name.len() as u8;
+                // Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
             }
             Response::ChatroomCreated {chatroom_name} => {
                 bytes[0] ^= 3;
-                Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                bytes[1] ^= chatroom_name.len() as u8;
+                // Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
             }
             Response::ChatroomAlreadyExists {chatroom_name, lobby_state} => {
                 bytes[0] ^= 4;
-                Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
-                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
+                bytes[1] ^= chatroom_name.len() as u8;
+                Response::serialize_data_length(&mut bytes, 2, lobby_state.len() as u32);
+                // Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
             }
             Response::ChatroomDoesNotExist {chatroom_name, lobby_state} => {
                 bytes[0] ^= 5;
-                Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
-                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
+                bytes[1] ^= chatroom_name.len() as u8;
+                // Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                Response::serialize_data_length(&mut bytes, 2, lobby_state.len() as u32);
             }
             Response::ChatroomFull {chatroom_name, lobby_state} => {
                 bytes[0] ^= 6;
-                Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
-                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
+                bytes[1] ^= chatroom_name.len() as u8;
+                // Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                Response::serialize_data_length(&mut bytes, 2, lobby_state.len() as u32);
             }
             Response::Message {peer_id,  msg} => {
                 bytes[0] ^= 7;
                 let peer_id_bytes = peer_id.as_bytes();
                 bytes[1..17].copy_from_slice(peer_id_bytes);
                 // Response::serialize_length(&mut bytes, 17, username.len() as u32);
-                Response::serialize_length(&mut bytes, 17, msg.len() as u32);
+                Response::serialize_data_length(&mut bytes, 17, msg.len() as u32);
             }
             Response::UsernameOk {username, lobby_state} => {
                 bytes[0] ^= 8;
-                Response::serialize_length(&mut bytes, 1, username.len() as u32);
-                Response::serialize_length(&mut bytes, 5, lobby_state.len() as u32);
+                bytes[1] ^= username.len() as u8;
+                // Response::serialize_length(&mut bytes, 1, username.len() as u32);
+                Response::serialize_data_length(&mut bytes, 2, lobby_state.len() as u32);
             }
             Response::UsernameAlreadyExists {username} => {
                 bytes[0] ^= 9;
-                Response::serialize_length(&mut bytes, 1, username.len() as u32);
+                bytes[1] ^= username.len() as u8;
+                // Response::serialize_length(&mut bytes, 1, username.len() as u32);
             }
             Response::ExitChatroom {chatroom_name} => {
                 bytes[0] ^= 10;
-                Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
+                bytes[1] ^= chatroom_name.len() as u8;
+                // Response::serialize_length(&mut bytes, 1, chatroom_name.len() as u32);
             }
             Response::Lobby {lobby_state} => {
                 bytes[0] ^= 11;
-                Response::serialize_length(&mut bytes, 1, lobby_state.len() as u32);
+                Response::serialize_data_length(&mut bytes, 1, lobby_state.len() as u32);
             }
             Response::ExitLobby => bytes[0] ^= 12,
         }
@@ -324,47 +345,54 @@ impl DeserAsBytes for Response {
 
     fn deserialize(tag: &Self::Tag) -> Self::TvlTag {
         let type_byte = tag[0];
-        let mut name_len = 0;
+        let mut name_len = 0u8;
         let mut data_len = 0;
         if type_byte ^ 1 == 0 {
-            (1, 0u128, 0u32, 0u32)
+            (1, 0u128, 0u8, 0u32)
         } else if type_byte ^ 2 == 0 {
-            Response::deserialize_length(tag, 1,&mut name_len);
+            // Response::deserialize_length(tag, 1,&mut name_len);
+            name_len ^= tag[1];
             (2, 0, name_len, 0)
         } else if type_byte ^ 3 == 0 {
-            Response::deserialize_length(tag, 1, &mut name_len);
+            // Response::deserialize_length(tag, 1, &mut name_len);
+            name_len ^= tag[1];
             (3, 0, name_len, 0)
         } else if type_byte ^ 4 == 0 {
-            Response::deserialize_length(tag, 1, &mut name_len);
-            Response::deserialize_length(tag, 5, &mut data_len);
+            // Response::deserialize_length(tag, 1, &mut name_len);
+            name_len ^= tag[1];
+            Response::deserialize_data_length(tag, 2, &mut data_len);
             (4, 0, name_len, data_len)
         } else if type_byte ^ 5 == 0 {
-            Response::deserialize_length(tag, 1, &mut name_len);
-            Response::deserialize_length(tag, 5, &mut data_len);
+            // Response::deserialize_length(tag, 1, &mut name_len);
+            name_len ^= tag[1];
+            Response::deserialize_data_length(tag, 2, &mut data_len);
             (5, 0, name_len, data_len)
         } else if type_byte ^ 6 == 0 {
-            Response::deserialize_length(tag, 1, &mut name_len);
-            Response::deserialize_length(tag, 5, &mut data_len);
+            // Response::deserialize_length(tag, 1, &mut name_len);
+            name_len ^= tag[1];
+            Response::deserialize_data_length(tag, 2, &mut data_len);
             (6, 0, name_len, data_len)
         } else if type_byte ^ 7 == 0 {
             let mut id_bytes = [0u8; 16];
             id_bytes.copy_from_slice(&tag[1..17]);
             let id = Uuid::from_bytes(id_bytes).as_u128();
-            // Response::deserialize_length(tag, 17, &mut name_len);
-            Response::deserialize_length(tag, 17, &mut data_len);
+            Response::deserialize_data_length(tag, 17, &mut data_len);
             (7, id, name_len, data_len)
         } else if type_byte ^ 8 == 0 {
-            Response::deserialize_length(tag, 1, &mut name_len);
-            Response::deserialize_length(tag, 5, &mut data_len);
+            // Response::deserialize_length(tag, 1, &mut name_len);
+            name_len ^= tag[1];
+            Response::deserialize_data_length(tag, 2, &mut data_len);
             (8, 0, name_len, data_len)
         } else if type_byte ^ 9 == 0 {
-            Response::deserialize_length(tag, 1, &mut name_len);
+            // Response::deserialize_length(tag, 1, &mut name_len);
+            name_len ^= tag[1];
             (9, 0, name_len, 0)
         } else if type_byte ^ 10  == 0 {
-            Response::deserialize_length(tag, 1, &mut name_len);
+            // Response::deserialize_length(tag, 1, &mut name_len);
+            name_len ^= tag[1];
             (10, 0, name_len, data_len)
         } else if type_byte ^ 11 == 0 {
-            Response::deserialize_length(tag, 1, &mut data_len);
+            Response::deserialize_data_length(tag, 1, &mut data_len);
             (11, 0, name_len, data_len)
         } else if type_byte ^ 12 == 0 {
             (12, 0, 0, 0)
@@ -902,44 +930,44 @@ mod test {
         let response = Response::ConnectionOk;
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test Subscribed
         let response = Response::Subscribed { chatroom_name: String::from("Test Chatroom") };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [2, 13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [2, 13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test ChatroomCreated
         let response = Response::ChatroomCreated { chatroom_name: String::from("Test Chatroom 42") };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [3, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [3, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test ChatroomAlreadyExists
         let response = Response::ChatroomAlreadyExists { chatroom_name: String::from("Test Chatroom 43"), lobby_state: vec![38, 23, 1, 1, 0] };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [4, 16, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [4, 16, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test ChatroomDoesNotExist
         let response = Response::ChatroomDoesNotExist { chatroom_name: String::from("Test Chatroom 43"), lobby_state: vec![38, 23, 1, 1, 0] };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [5, 16, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [5, 16, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test ChatroomFull
         let response = Response::ChatroomFull { chatroom_name: String::from("Test Chatroom 44"), lobby_state: vec![38, 23, 1, 1, 0, 0, 0, 0, 34] };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [6, 16, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [6, 16, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test Message
         let peer_id = Uuid::new_v4();
         let response = Response::Message { peer_id,  msg: String::from("Test message") };
         let tag = response.serialize();
         println!("{:?}", tag);
-        let mut expected_tag = [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_tag = [7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_tag[1..17].copy_from_slice(peer_id.as_bytes());
         // expected_tag[17] = 13;
         expected_tag[17] = 12;
@@ -949,31 +977,31 @@ mod test {
         let response = Response::UsernameOk {username: String::from("Good test username"), lobby_state: vec![0, 0, 0] };
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [8, 18, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [8, 18, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test UsernameAlreadyExists
         let response = Response::UsernameAlreadyExists {username: String::from("Good test username 42")};
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [9, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [9, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test ExitChatroom
         let response = Response::ExitChatroom {chatroom_name: String::from("Perfect chatroom name")};
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [10, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [10, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test Lobby
         let response = Response::Lobby {lobby_state: vec![42, 42, 42, 42, 42, 42, 10, 1]};
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [11, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [11, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test ExitLobby
         let response = Response::ExitLobby;
         let tag = response.serialize();
         println!("{:?}", tag);
-        assert_eq!(tag, [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(tag, [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -1106,13 +1134,13 @@ mod test {
         let response = Response::ConnectionOk;
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        assert_eq!(response_bytes, vec![1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(response_bytes, vec![1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         // Test Subscribed
         let response = Response::Subscribed { chatroom_name: String::from("Test Chatroom") };
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![2, 13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![2, 13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("Test Chatroom").as_bytes());
         assert_eq!(response_bytes, expected_bytes);
 
@@ -1120,7 +1148,7 @@ mod test {
         let response = Response::ChatroomCreated { chatroom_name: String::from("Test Chatroom 42") };
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![3, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![3, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("Test Chatroom 42").as_bytes());
         assert_eq!(response_bytes, expected_bytes);
 
@@ -1128,7 +1156,7 @@ mod test {
         let response = Response::ChatroomAlreadyExists { chatroom_name: String::from("Test Chatroom 43"), lobby_state: vec![97, 98, 99] };
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![4, 16, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![4, 16, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("Test Chatroom 43").as_bytes());
         expected_bytes.extend_from_slice(&[97, 98, 99]);
         assert_eq!(response_bytes, expected_bytes);
@@ -1137,7 +1165,7 @@ mod test {
         let response = Response::ChatroomDoesNotExist { chatroom_name: String::from("Test Chatroom 44"), lobby_state: vec![97, 98, 99, 100] };
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![5, 16, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![5, 16, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("Test Chatroom 44").as_bytes());
         expected_bytes.extend_from_slice(&[97, 98, 99, 100]);
         assert_eq!(response_bytes, expected_bytes);
@@ -1146,7 +1174,7 @@ mod test {
         let response = Response::ChatroomFull { chatroom_name: String::from("Another Test Chatroom 45"), lobby_state: vec![97, 98, 99, 100, 101, 103] };
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![6, 24, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![6, 24, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("Another Test Chatroom 45").as_bytes());
         expected_bytes.extend_from_slice(&[97, 98, 99, 100, 101, 103]);
         assert_eq!(response_bytes, expected_bytes);
@@ -1156,7 +1184,7 @@ mod test {
         let response = Response::Message { peer_id,  msg: String::from("Hello World!")};
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![0; 25];
+        let mut expected_bytes = vec![0; 22];
         expected_bytes[0] = 7;
         expected_bytes[1..17].copy_from_slice(peer_id.as_bytes());
         expected_bytes[17] = 12;
@@ -1169,7 +1197,7 @@ mod test {
         let response = Response::UsernameOk { username: String::from("My test username"), lobby_state: vec![97, 98, 99, 100, 101, 103] };
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![8, 16, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![8, 16, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("My test username").as_bytes());
         expected_bytes.extend_from_slice(&[97, 98, 99, 100, 101, 103]);
         assert_eq!(response_bytes, expected_bytes);
@@ -1178,7 +1206,7 @@ mod test {
         let response = Response::UsernameAlreadyExists { username: String::from("My bad test username")};
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![9, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![9, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("My bad test username").as_bytes());
         assert_eq!(response_bytes, expected_bytes);
 
@@ -1186,7 +1214,7 @@ mod test {
         let response = Response::ExitChatroom { chatroom_name: String::from("Test Exit chatroom name")};
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![10, 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![10, 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(String::from("Test Exit chatroom name").as_bytes());
         assert_eq!(response_bytes, expected_bytes);
 
@@ -1194,7 +1222,7 @@ mod test {
         let response = Response::Lobby { lobby_state: vec![97, 98, 99, 100, 101, 103]};
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![11, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![11, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         expected_bytes.extend_from_slice(&[97, 98, 99, 100, 101, 103]);
         assert_eq!(response_bytes, expected_bytes);
 
@@ -1202,7 +1230,7 @@ mod test {
         let response = Response::ExitLobby;
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
-        let mut expected_bytes = vec![12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut expected_bytes = vec![12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(response_bytes, expected_bytes);
 
     }
