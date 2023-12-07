@@ -17,6 +17,7 @@ pub enum ServerError {
     StateError(String),
     ChannelReceiveError(String),
     IllegalEvent(String),
+    IllegalResponse(String),
 }
 
 impl Display for ServerError {
@@ -28,6 +29,7 @@ impl Display for ServerError {
             ServerError::StateError(s) => write!(f, "state error in server: {s}"),
             ServerError::ChannelReceiveError(s) => write!(f, "error receiving from channel: {s}"),
             ServerError::IllegalEvent(s) => write!(f, "illegal event in server: {s}"),
+            ServerError::IllegalResponse(s) => write!(f, "illegal response in server: {s}"),
         }
     }
 }

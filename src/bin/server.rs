@@ -179,7 +179,7 @@ async fn client_write_loop(
     let mut client_stream = &*client_stream;
 
     // The broker for the chatroom, yet to be set, will yield poll pending until it is reset
-    let (_, chat_receiver) = tokio::sync::broadcast::channel::<Response>(100);
+    let (mut dummy_chat_sender, chat_receiver) = tokio::sync::broadcast::channel::<Response>(100);
     let mut chat_receiver = BroadcastStream::new(chat_receiver).fuse();
 
     // Fuse main broker receiver and shutdown streams
@@ -203,7 +203,15 @@ async fn client_write_loop(
             // Check for a response from main broker
             resp = main_broker_receiver.next().fuse() => {
                 match resp {
-                    Some(resp) => resp,
+                    Some(resp) => {
+                        if resp.is_exit_chatroom() {
+                            let (new_dummy_chat_sender, new_chat_receiver) = broadcast::channel::<Response>(100);
+                            // Reset the chat_receiver channel
+                            dummy_chat_sender = new_dummy_chat_sender;
+                            chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
+                        }
+                        resp
+                    },
                     None => {
                         eprintln!("received none from main broker receiver");
                         return Err(ServerError::ConnectionFailed);
@@ -215,8 +223,8 @@ async fn client_write_loop(
             subscription = chatroom_broker_receiver.next().fuse() => {
                 println!("attempting to subscribe to chatroom");
                 match subscription {
-                    Some(resp) => {
-                        let (new_chat_receiver, resp) = resp;
+                    Some(sub) => {
+                        let (new_chat_receiver, resp) = sub;
                         // assert that resp is the Subscribed or ChatroomCreated variant
                         // it is a panic condition if the response sent on this channel from the
                         // main broker is neither of these variants
@@ -239,21 +247,17 @@ async fn client_write_loop(
             resp = chat_receiver.next().fuse() => {
                 match resp {
                     Some(resp_res) => {
-                        match resp_res {
-                            Ok(resp) => {
-                                // Check if we have received an exit response from the chatroom broker,
-                                // if so we need to update chat_receiver
-                                if resp.is_exit_chatroom() {
-                                    let (_, new_chat_receiver) = tokio::sync::broadcast::channel::<Response>(100);
-                                    let mut new_chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
-                                    chat_receiver = new_chat_receiver;
-                                }
-                                resp
-                            }
-                            Err(_) => {
-                                eprintln!("error parsing response from 'chat_receiver'");
-                                return Err(ServerError::ConnectionFailed);
-                            }
+                        let response = if let Ok(r) = resp_res {
+                            r
+                        } else {
+                            return Err(ServerError::ConnectionFailed)
+                        };
+                        // Filter the response, check that we only receive messages and filter
+                        // all messages not from the current client
+                        match &response {
+                            Response::Message {msg, peer_id} if *peer_id != client_id => response,
+                            Response::Message { msg, peer_id } => continue,
+                            _ => return Err(ServerError::IllegalResponse(format!("client {} write task received illegal response from chatroom broker", client_id))),
                         }
                     },
                     None => {
@@ -366,6 +370,14 @@ impl AsBytes for Chatroom {
     }
 }
 
+fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
+    let mut lobby_state = vec![];
+    for (_, chatroom) in chatroom_brokers {
+        lobby_state.append(&mut chatroom.as_bytes());
+    }
+    lobby_state
+}
+
 async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     // For keeping track of current clients
     let mut clients: HashMap<Uuid, Client> = HashMap::new();
@@ -438,7 +450,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                         // Attempt to send shutdown signal
                         match chatroom_broker.shutdown.take() {
                             Some(shutdown) => {
-                                drop(shutdown)
+                                drop(shutdown);
                             }
                             _ => return Err(ServerError::StateError(format!("chatroom sub-broker with id {} should have shutdown set to some", chatroom_id))),
                         }
@@ -485,7 +497,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 )?;
 
                 // Ensure we have a client with peer_id
-                let client = clients.get_mut(&peer_id).ok_or(ServerError::StateError(format!("client with id {} should exist in map", peer_id)))?;
+                let mut client = clients.get_mut(&peer_id).ok_or(ServerError::StateError(format!("client with id {} should exist in map", peer_id)))?;
 
                 // Take chatroom broker id from client, since client is exiting
                 let chatroom_broker_id = client.chatroom_broker_id
@@ -496,6 +508,12 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 let mut chatroom_broker = chatroom_brokers
                     .remove(&chatroom_broker_id)
                     .ok_or(ServerError::StateError(format!("chatroom sub-broker with id {} should exist in map", chatroom_broker_id)))?;
+
+                // Send Exit lobby response to client
+                let resp_chatroom_name = (&*chatroom_broker.name).clone();
+                client.main_broker_write_task_sender.send(Response::ExitChatroom {chatroom_name: resp_chatroom_name})
+                    .await
+                    .map_err(|_| ServerError::ConnectionFailed)?;
 
                 // Decrement client count for the current broker
                 chatroom_broker.num_clients -= 1;
@@ -597,11 +615,11 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                     // Clone channel sender for moving into a new task, for sending back channel connections when chatroom is finished
                     let mut disconnection_sender_clone = disconnected_sub_broker_sender.clone();
 
-                    // Clone channel for subscriptions
+                    // Clone channel for subscriptions so chatroom can send responses to all subscribers
                     let mut broadcast_sender_clone = broadcast_sender.clone();
 
                     // Spawn chatroom broker task
-                    let chatroom_handle = task::spawn(async move {
+                    let _chatroom_handle = task::spawn(async move {
                         let res = chatroom_broker(&mut client_receiver, &mut client_exit_clone, &mut broadcast_sender_clone, shutdown_receiver).await;
                         if let Err(ref e) = res {
                             // TODO: add logging/tracing
@@ -694,7 +712,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                         .map_err(|_| ServerError::ConnectionFailed)?;
                 }
             }
-            Event::Username {peer_id, new_username} => {
+            Event::Username { peer_id, new_username} => {
                 // Get client from map
                 let mut client = clients.get_mut(&peer_id)
                     .ok_or(ServerError::StateError(format!("client with id {} should exist in client map", peer_id)))?;
@@ -709,7 +727,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 }
 
                 if client_usernames.contains(&new_username) {
-                    let response = Response::UsernameAlreadyExists {username: new_username};
+                    let response = Response::UsernameAlreadyExists { username: new_username };
                     client.main_broker_write_task_sender
                         .send(response)
                         .await
@@ -812,14 +830,14 @@ async fn chatroom_broker(
         let response = select! {
             event = events.select_next_some().fuse() => {
                 match event {
-                    Event::Quit {peer_id} => {
+                    Event::Quit { peer_id } => {
                         client_exit.send(Event::Quit { peer_id })
                         .await
                         .map_err(|_| ServerError::ConnectionFailed)?;
                         continue;
                     }
-                    Event::Message {message, peer_id} => Response::Message {peer_id, msg: message},
-                    _ => return Err(ServerError::IllegalEvent(format!("received illegal event, should only receive messages and quit events"))),
+                    Event::Message { message, peer_id} => Response::Message {peer_id, msg: message},
+                    _ => return Err(ServerError::IllegalEvent(format!("received illegal event, should only receive message and quit events"))),
                 }
             },
             shutdown = shutdown_receiver.next().fuse() => {
@@ -831,23 +849,20 @@ async fn chatroom_broker(
         };
 
         // TODO: task may block, maybe use a different approach, repeated clones may be expensive
-        let mut sender_clone = broadcast_sender.clone();
-        task::spawn_blocking(move || {
-            sender_clone.send(response).map_err(|_| ServerError::ConnectionFailed)
-        }).await?;
+        broadcast_sender
+            .send(response)
+            .map_err(|_| ServerError::ConnectionFailed)?;
+        // let mut sender_clone = broadcast_sender.clone();
+        // task::spawn_blocking(move || {
+        //     sender_clone.send(response).map_err(|_| ServerError::ConnectionFailed)
+        // }).await?;
 
     }
 
     Ok(())
 }
 
-fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
-    let mut lobby_state = vec![];
-    for (_, chatroom) in chatroom_brokers {
-        lobby_state.append(&mut chatroom.as_bytes());
-    }
-    lobby_state
-}
+
 
 
 fn main() {todo!()}
@@ -929,5 +944,4 @@ mod test {
 
         assert_eq!(chatroom_bytes, expected_bytes);
     }
-
 }
