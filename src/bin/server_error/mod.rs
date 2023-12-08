@@ -11,23 +11,27 @@ pub mod prelude {
 
 #[derive(Debug)]
 pub enum ServerError {
-    ConnectionFailed,
-    ParseFrame(&'static str),
+    ConnectionFailed(String),
+    ParseFrame(String),
     SubscriptionError(&'static str),
     StateError(String),
     ChannelReceiveError(String),
+    ChannelSendError(String),
     IllegalEvent(String),
     IllegalResponse(String),
+    IllegalFrame(String),
 }
 
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ServerError::ConnectionFailed => write!(f, "unable to connect"),
+            ServerError::ConnectionFailed(s) => write!(f, "connection error occurred: {s}"),
             ServerError::ParseFrame(s) => write!(f, "parse frame error: {s}"),
             ServerError::SubscriptionError(s) => write!(f, "error from subscription stream: {s}"),
             ServerError::StateError(s) => write!(f, "state error in server: {s}"),
             ServerError::ChannelReceiveError(s) => write!(f, "error receiving from channel: {s}"),
+            ServerError::ChannelSendError(s) => write!(f, "error sending on channel: {s}"),
+            ServerError::IllegalFrame(s) => write!(f, "illegal frame: {s}"),
             ServerError::IllegalEvent(s) => write!(f, "illegal event in server: {s}"),
             ServerError::IllegalResponse(s) => write!(f, "illegal response in server: {s}"),
         }
