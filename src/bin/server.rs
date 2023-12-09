@@ -604,6 +604,22 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                     .await
                     .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
             }
+            Event::ReadSync  {peer_id} => {
+                let mut client = clients.get_mut(&peer_id)
+                    .ok_or(ServerError::StateError(format!("no client with id {} contained in client map", peer_id)))?;
+                // Ensure client has username set, sub_broker_id set as well
+                if client.username.is_none() {
+                    return Err(ServerError::IllegalEvent(format!("client with id {} sent 'ReadSync' event without having username set", peer_id)));
+                }
+                if client.chatroom_broker_id.is_none() {
+                    return Err(ServerError::IllegalEvent(format!("client with id {} sent 'ReadSync' event without having chatroom_sub_broker_id set", peer_id)));
+                }
+                let response = Response::ReadSync;
+                client.main_broker_write_task_sender
+                    .send(response)
+                    .await
+                    .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
+            }
             Event::Create {peer_id, chatroom_name} => {
                 // Get client reference first, ensure client is a valid connected client
                 let mut client = clients.get_mut(&peer_id)
