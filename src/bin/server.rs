@@ -99,7 +99,9 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
                     Some(chatroom_channel) => {
                         chatroom_sender = Some(chatroom_channel);
                         // Send the main broker an event that this client is now able to start sending messages
-
+                        main_broker_sender.send(Event::ReadSync {peer_id})
+                            .await
+                            .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send event to main broker", peer_id)))?;
                         continue;
                     },
                     None => {

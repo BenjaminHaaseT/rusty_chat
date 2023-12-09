@@ -57,6 +57,8 @@ pub enum Response {
     /// A response informing the client they have exited the lobby
     ExitLobby,
 
+    /// A response informing the client that their read-task is synced a new chatroom-sub-broker
+    ReadSync,
 }
 
 impl Response {
@@ -188,6 +190,8 @@ impl Response {
             Ok(Response::Lobby {lobby_state: lobby_state_bytes})
         } else if type_byte ^ 12 == 0 {
             Ok(Response::ExitLobby)
+        } else if type_byte ^ 13 == 0 {
+            Ok(Response::ReadSync)
         } else {
             panic!("invalid type byte detected");
         }
@@ -335,6 +339,7 @@ impl SerAsBytes for Response {
                 Response::serialize_data_length(&mut bytes, 1, lobby_state.len() as u32);
             }
             Response::ExitLobby => bytes[0] ^= 12,
+            Response::ReadSync => bytes[0] ^= 13,
         }
         bytes
     }
@@ -396,8 +401,10 @@ impl DeserAsBytes for Response {
             (11, 0, name_len, data_len)
         } else if type_byte ^ 12 == 0 {
             (12, 0, 0, 0)
+        } else if type_byte ^ 13 == 0 {
+            (13, 0, 0, 0)
         } else {
-            panic!("invalid type flag detected")
+            panic!("invalid type flag detected");
         }
     }
 }
@@ -440,6 +447,7 @@ impl AsBytes for Response {
                 bytes.extend_from_slice(lobby_state.as_slice());
             }
             Response::ExitLobby => {}
+            Response::ReadSync => {}
         }
         bytes
     }
@@ -449,6 +457,7 @@ impl AsBytes for Response {
 pub enum Event {
     Quit {peer_id: Uuid},
     Lobby {peer_id: Uuid},
+    ReadSync {peer_id: Uuid},
     Join {
         chatroom_name: String,
         peer_id: Uuid
@@ -1002,6 +1011,12 @@ mod test {
         let tag = response.serialize();
         println!("{:?}", tag);
         assert_eq!(tag, [12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        // Test ReadSync
+        let response = Response::ReadSync;
+        let tag = response.serialize();
+        println!("{:?}", tag);
+        assert_eq!(tag, [13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -1126,6 +1141,16 @@ mod test {
         assert_eq!(id, 0);
         assert_eq!(name_len, 0);
         assert_eq!(data_len, 0);
+
+        // Test ReadSync
+        let response = Response::ReadSync;
+        let tag = response.serialize();
+        let (type_byte, id, name_len, data_len) = Response::deserialize(&tag);
+        println!("{:?}", (type_byte, id, name_len, data_len));
+        assert_eq!(type_byte, 13);
+        assert_eq!(id, 0);
+        assert_eq!(name_len, 0);
+        assert_eq!(data_len, 0);
     }
 
     #[test]
@@ -1231,6 +1256,13 @@ mod test {
         let response_bytes = response.as_bytes();
         println!("{:?}", response_bytes);
         let mut expected_bytes = vec![12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(response_bytes, expected_bytes);
+
+        // Test ReadSync
+        let response = Response::ReadSync;
+        let response_bytes = response.as_bytes();
+        println!("{:?}", response_bytes);
+        let mut expected_bytes = vec![13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(response_bytes, expected_bytes);
 
     }
@@ -1366,6 +1398,17 @@ mod test {
 
         // Test ExitLobby
         let response = Response::ExitLobby;
+        let mut input_reader = Cursor::new(response.as_bytes());
+
+        let parsed_response_res = block_on(Response::try_parse(&mut input_reader));
+        println!("{:?}", parsed_response_res);
+        assert!(parsed_response_res.is_ok());
+
+        let parsed_response = parsed_response_res.unwrap();
+        assert_eq!(parsed_response, response);
+
+        // Test ReadSync
+        let response = Response::ReadSync;
         let mut input_reader = Cursor::new(response.as_bytes());
 
         let parsed_response_res = block_on(Response::try_parse(&mut input_reader));
