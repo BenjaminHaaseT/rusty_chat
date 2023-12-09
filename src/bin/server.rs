@@ -98,6 +98,8 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
                 match chatroom_sender_opt {
                     Some(chatroom_channel) => {
                         chatroom_sender = Some(chatroom_channel);
+                        // Send the main broker an event that this client is now able to start sending messages
+
                         continue;
                     },
                     None => {
