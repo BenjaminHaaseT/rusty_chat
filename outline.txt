@@ -96,3 +96,48 @@ Server:
                     Needs to initiate graceful shutdown, sending its own disconnect sender back to main broker
                     to signal to the broker that the chatroom is now empty and should be removed from the current state
                     of the main broker task
+
+
+
+Client:
+    An executable that takes command line arguments of sever_address and port to connect to. Should connect to
+    the address via TCP, sending requests and responses. Whenever a request is sent, the client should listen for
+    particular response(s). When a response is received the client interface must adjust its state i.e update it's UI
+    according to the response received.
+
+    Interface:
+        Needs to accept a write half and read half of a tcp stream, and start the loop for listening for responses/parsing requests from the client.
+        Should maintain a current UI page that is displayed, logic for interpreting user requests needs to be bound on
+        the page being displayed, since it is dependent upon where the client is i.e. in the lobby, in the chatroom entering username etc...
+
+        State:
+            Page: A state machine that will take input from client and server streams execute appropriate logic and
+            display output to the user. Needs to be able to parse input from the user (with checks) and return Frames
+            representing the clients desired requests. Needs to be able to accept responses from the user and execute accordingly
+            So the Page needs to be responsible for changing to the next state given the response received, as well
+            as the logic for handling client input
+
+            So at a high level a single page will have the following api
+            Page.parse_request(input) -> Frame
+            Page.parse_response(stream) -> Response
+            Page.display()
+            Page.change_state()
+
+        Functionality:
+            Main loop for interface:
+                -Bind connection
+                -Instantiate initial page
+
+                Then Do
+                    wait for response from server stream
+                    update page.state_from_response(server) from response
+                    - should also display ui page in here when appropriate as part of getting its state
+
+                    parse frame from client input i.e
+                    frame <- page.parse_request(input)
+                    send request to server
+
+
+
+
+

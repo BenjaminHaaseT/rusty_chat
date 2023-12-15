@@ -245,7 +245,7 @@ async fn client_write_loop(
                             chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
                             resp
                         } else {
-                            return Err(ServerError::IllegalResponse(format!("client {} received a {:?} response on 'chatroom_broker_receiver'", client_id, res)));
+                            return Err(ServerError::IllegalResponse(format!("client {} received a {:?} response on 'chatroom_broker_receiver'", client_id, resp)));
                         }
                     },
                     None => {
@@ -859,8 +859,13 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                     res
                 });
 
-                // Insert new client into state
+                // Send client connection ok response to client's write task
+                client.main_broker_write_task_sender.send(Response::ConnectionOk)
+                    .await
+                    .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send 'ConnectionOk' response to new client with id {}", client.id)))?;
+
                 clients.insert(peer_id, client);
+
             }
             Event::Message {ref message, peer_id} => return Err(ServerError::IllegalEvent(format!("main broker received illegal event from client {}", peer_id))),
         }
