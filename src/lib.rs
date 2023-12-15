@@ -2,7 +2,8 @@
 use uuid::Uuid;
 
 use std::collections::HashMap;
-use std::io::Read;
+use std::convert::TryFrom;
+use std::io::{Read, Cursor};
 use std::sync::Arc;
 use async_std::net;
 pub use async_std::channel::{Receiver as AsyncStdReceiver, Sender as AsyncStdSender};
@@ -133,6 +134,31 @@ impl ChatroomFrame {
             .map_err(|_| "error parsing 'ChatroomFrame' name bytes as valid utf")?;
 
         Ok(ChatroomFrame { name, capacity: capacity as usize, num_clients: num_clients as usize} )
+    }
+}
+
+#[derive(Debug)]
+pub struct ChatroomFrames {
+    frames: Vec<ChatroomFrame>,
+}
+
+impl TryFrom<Vec<u8>> for ChatroomFrames {
+    type Error = &'static str;
+
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        let len = bytes.len() as u64;
+        let mut cursor = std::io::Cursor::new(bytes);
+        let mut frames = vec![];
+
+        loop {
+            let frame = ChatroomFrame::try_parse(&mut cursor)?;
+            frames.push(frame);
+            if cursor.position() == len {
+                break;
+            }
+        }
+
+        Ok(ChatroomFrames { frames })
     }
 }
 
@@ -1670,5 +1696,10 @@ mod test {
         assert_eq!(chatroom_frame.name.as_str(), chatroom.name.as_str());
         assert_eq!(chatroom_frame.capacity, chatroom.capacity);
         assert_eq!(chatroom_frame.num_clients, chatroom.num_clients);
+    }
+
+    #[test]
+    fn test_try_from_chatroom_frames() {
+        todo!()
     }
 }
