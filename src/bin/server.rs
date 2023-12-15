@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
+use std::io::Read as StdRead;
 
 use async_std::io::{Read, ReadExt, Write, WriteExt};
 use async_std::channel::{self, Sender, Receiver};

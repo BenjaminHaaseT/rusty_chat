@@ -1,6 +1,7 @@
 //! Contains the traits and data structures to represent the UI pages of a client facing `Interface`
 //!
 use std::fmt::Display;
+use std::{print, println, panic, todo};
 use std::marker::Unpin;
 use async_std::{
     io::{Read, ReadExt}
@@ -18,8 +19,8 @@ use rusty_chat::prelude::*;
 pub enum UIPage {
     WelcomePage,
     UsernamePage,
-    LobbyPage { lobby_state: Vec<u8> },
-    Chatroom { chatroom_name: String },
+    LobbyPage { username: String, lobby_state: Vec<u8> },
+    Chatroom { username: String, chatroom_name: String },
 }
 
 impl UIPage {
@@ -29,6 +30,7 @@ impl UIPage {
 
     pub async fn state_from_response<R: ReadExt + Unpin>(self, server_stream: R) -> Result<(), UserError> {
         let mut server_stream = server_stream;
+
         // Attempt to parse a response from the given server stream
         let response = Response::try_parse(&mut server_stream)
             .await
@@ -48,6 +50,27 @@ impl UIPage {
                 println!();
                 print!("Please enter your username: ");
                 UIPage::UsernamePage
+            }
+
+            UIPage::UsernamePage => {
+                println!("{}", "-".repeat(80));
+                match response {
+                    Response::UsernameAlreadyExists { username} => {
+                        println!("Sorry, but '{}' is already taken", username);
+                        println!("Please enter your username: ");
+                        UIPage::UsernamePage
+                    }
+                    Response::UsernameOk { username, lobby_state} => {
+                        // Inform client chosen username is ok
+                        println!("Welcome {}", username);
+
+                        // Display lobby state to user
+
+                        // Create new Lobby page and return
+                        todo!()
+                    }
+                    _ => todo!()
+                }
             }
             _ => panic!()
         }
