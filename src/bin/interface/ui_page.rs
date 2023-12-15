@@ -7,7 +7,7 @@ use async_std::{
     io::{Read, ReadExt}
 };
 
-use super::*;
+use crate::UserError;
 use rusty_chat::prelude::*;
 
 /// A state machine that represents all pages of the UI.
@@ -19,7 +19,7 @@ use rusty_chat::prelude::*;
 pub enum UIPage {
     WelcomePage,
     UsernamePage,
-    LobbyPage { username: String, lobby_state: Vec<u8> },
+    LobbyPage { username: String, lobby_state: Vec<ChatroomFrame> },
     Chatroom { username: String, chatroom_name: String },
 }
 
@@ -28,7 +28,7 @@ impl UIPage {
         UIPage::WelcomePage
     }
 
-    pub async fn state_from_response<R: ReadExt + Unpin>(self, server_stream: R) -> Result<(), UserError> {
+    pub async fn state_from_response<R: ReadExt + Unpin>(self, server_stream: R) -> Result<UIPage, UserError> {
         let mut server_stream = server_stream;
 
         // Attempt to parse a response from the given server stream
@@ -49,32 +49,30 @@ impl UIPage {
                 println!("A chatroom built with rust using a command line interface");
                 println!();
                 print!("Please enter your username: ");
-                UIPage::UsernamePage
-            }
-
+                return Ok(UIPage::UsernamePage);
+            },
             UIPage::UsernamePage => {
                 println!("{}", "-".repeat(80));
                 match response {
                     Response::UsernameAlreadyExists { username} => {
                         println!("Sorry, but '{}' is already taken", username);
                         println!("Please enter your username: ");
-                        UIPage::UsernamePage
+                        return Ok(UIPage::UsernamePage);
                     }
                     Response::UsernameOk { username, lobby_state} => {
                         // Inform client chosen username is ok
                         println!("Welcome {}", username);
 
-                        // Display lobby state to user
+                        // Parse the lobby state
 
                         // Create new Lobby page and return
-                        todo!()
+                        return Ok(UIPage::UsernamePage);
                     }
                     _ => todo!()
                 }
-            }
+            },
             _ => panic!()
         }
 
-        Ok(())
     }
 }

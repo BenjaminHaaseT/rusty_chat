@@ -2,6 +2,7 @@
 use uuid::Uuid;
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::sync::Arc;
 use async_std::net;
 pub use async_std::channel::{Receiver as AsyncStdReceiver, Sender as AsyncStdSender};
@@ -11,6 +12,128 @@ use futures::AsyncReadExt;
 
 pub mod prelude {
     pub use super::*;
+}
+
+/// Models a single chatroom that is hosted by the server.
+#[derive(Debug)]
+pub struct Chatroom {
+    /// The unique id of the chatroom.
+    pub id: Uuid,
+
+    /// The name of the chatroom.
+    pub name: Arc<String>,
+
+    /// A sending half of the broadcast channel that the chatroom-sub-broker task
+    /// will use to broadcast messages to all subscribing clients. Used for creating new subscriptions,
+    /// whenever a new client wants to join.
+    pub client_subscriber: TokioBroadcastSender<Response>,
+
+    /// The sending half of the channel that can be cloned and sent to any client's read task,
+    /// that way new client's can take a clone of the sending half of this channel and start sending events.
+    pub client_read_sender: AsyncStdSender<Event>,
+
+    /// The sending half of a channel used for synchronizing shutdown ie, dropping this channel (when it is 'Some')
+    /// will initiate a graceful shutdown procedure for the current chatroom-sub-broker task. May or may not be set.
+    pub shutdown: Option<AsyncStdSender<Null>>,
+
+    /// The capacity of the chatroom ie number of clients it can serve.
+    pub capacity: usize,
+
+    /// The current number of clients connected with the chatroom.
+    pub num_clients: usize,
+}
+
+impl Chatroom {
+    fn serialize_name_length(&self, tag: &mut [u8; 12]) {
+        let name_len = self.name.len();
+        for i in 0..4 {
+            tag[i] ^= ((name_len >> (i * 8)) & 0xff) as u8;
+        }
+    }
+
+    fn serialize_capacity(&self, tag: &mut [u8; 12]) {
+        for i in 4..8 {
+            tag[i] ^= ((self.capacity >> ((i % 4) * 8)) & 0xff) as u8;
+        }
+    }
+
+    fn serialize_num_clients(&self, tag: &mut [u8; 12]) {
+        for i in 8..12 {
+            tag[i] ^= ((self.num_clients >> ((i % 4) * 8)) & 0xff) as u8;
+        }
+    }
+}
+
+type ChatroomEncodeTag = [u8; 12];
+
+impl SerializationTag for ChatroomEncodeTag {}
+
+type ChatroomDecodeTag = (u32, u32, u32);
+
+impl DeserializationTag for ChatroomDecodeTag {}
+
+impl SerAsBytes for Chatroom {
+    type Tag = ChatroomEncodeTag;
+
+    fn serialize(&self) -> Self::Tag {
+        let mut tag = [0u8; 12];
+        self.serialize_name_length(&mut tag);
+        self.serialize_capacity(&mut tag);
+        self.serialize_num_clients(&mut tag);
+        tag
+    }
+}
+
+impl DeserAsBytes for Chatroom {
+    type TvlTag = ChatroomDecodeTag;
+
+    fn deserialize(tag: &Self::Tag) -> Self::TvlTag {
+        // let inner = tag;
+        let mut name_len = 0;
+        for i in 0..4 {
+            name_len ^= (tag[i] as u32) << (i * 8);
+        }
+        let mut capacity = 0;
+        for i in 4..8 {
+            capacity ^= (tag[i] as u32) << ((i % 4) * 8);
+        }
+        let mut num_clients = 0;
+        for i in 8..12 {
+            num_clients ^= (tag[i] as u32) << ((i % 4) * 8);
+        }
+        (name_len, capacity, num_clients)
+    }
+}
+
+impl AsBytes for Chatroom {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut bytes = self.serialize().to_vec();
+        bytes.extend_from_slice(self.name.as_bytes());
+        bytes
+    }
+}
+
+#[derive(Debug)]
+pub struct ChatroomFrame {
+    pub name: String,
+    pub capacity: usize,
+    pub num_clients: usize,
+}
+
+impl ChatroomFrame {
+    pub fn try_parse<R: Read>(mut reader: R) -> Result<ChatroomFrame, &'static str> {
+        let mut tag = [0u8; 12];
+        reader.read_exact(&mut tag)
+            .map_err(|_| "error reading 'ChatroomFrame' tag from reader")?;
+        let (name_len, capacity, num_clients) = <Chatroom as DeserAsBytes>::deserialize(&tag);
+        let mut name_bytes = vec![0; name_len as usize];
+        reader.read_exact(name_bytes.as_mut_slice())
+            .map_err(|_| "error reading name bytes for 'ChatroomFrame' from reader")?;
+        let name = String::from_utf8(name_bytes)
+            .map_err(|_| "error parsing 'ChatroomFrame' name bytes as valid utf")?;
+
+        Ok(ChatroomFrame { name, capacity: capacity as usize, num_clients: num_clients as usize} )
+    }
 }
 
 /// An enum that represents all possible responses that can be sent from the server back to the client
@@ -1424,5 +1547,128 @@ mod test {
 
         let parsed_response = parsed_response_res.unwrap();
         assert_eq!(parsed_response, response);
+    }
+
+
+
+    #[test]
+    fn test_chatroom_serialize() {
+        use tokio::sync::broadcast;
+        use async_std::channel;
+
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+
+        let chatroom = Chatroom {
+            id,
+            name: Arc::new(String::from("Test chatroom 666")),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let tag = chatroom.serialize();
+
+        println!("{:?}", tag);
+        assert_eq!(tag, [17, 0, 0, 0, 190, 18, 0, 0, 49, 9, 0, 0])
+    }
+
+    #[test]
+    fn test_chatroom_deserialize() {
+        use tokio::sync::broadcast;
+        use async_std::channel;
+
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+        let name = Arc::new(String::from("Test chatroom 666"));
+
+        let chatroom = Chatroom {
+            id,
+            name: name.clone(),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let tag = chatroom.serialize();
+        let decode_tag = Chatroom::deserialize(&tag);
+
+        println!("{:?}", decode_tag);
+        assert_eq!(decode_tag.0, name.len() as u32);
+        assert_eq!(decode_tag.1, 4798);
+        assert_eq!(decode_tag.2, 2353);
+    }
+
+    #[test]
+    fn test_chatroom_as_bytes() {
+        use tokio::sync::broadcast;
+        use async_std::channel;
+
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+        let name = Arc::new(String::from("Test chatroom 666"));
+
+        let chatroom = Chatroom {
+            id,
+            name: name.clone(),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let chatroom_bytes = chatroom.as_bytes();
+        println!("{:?}", chatroom_bytes);
+
+        let mut expected_bytes = chatroom.serialize().to_vec();
+        expected_bytes.extend_from_slice(name.as_bytes());
+
+        assert_eq!(chatroom_bytes, expected_bytes);
+    }
+
+    #[test]
+    fn test_try_parse_chatroom_frame() {
+        use tokio::sync::broadcast;
+        use async_std::channel;
+        use std::io::Cursor;
+
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+        let name = Arc::new(String::from("Test chatroom 666"));
+
+        let chatroom = Chatroom {
+            id,
+            name: name.clone(),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let chatroom_bytes = chatroom.as_bytes();
+        let mut cursor = Cursor::new(chatroom_bytes);
+
+        // Attempt to parse the frame
+        let chatroom_frame_res = ChatroomFrame::try_parse(&mut cursor);
+
+        println!("{:?}", chatroom_frame_res);
+
+        let chatroom_frame = chatroom_frame_res.unwrap();
+
+        println!("{:?}", chatroom_frame);
+
+        assert_eq!(chatroom_frame.name.as_str(), chatroom.name.as_str());
+        assert_eq!(chatroom_frame.capacity, chatroom.capacity);
+        assert_eq!(chatroom_frame.num_clients, chatroom.num_clients);
     }
 }
