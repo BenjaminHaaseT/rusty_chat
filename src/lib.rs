@@ -149,7 +149,6 @@ impl TryFrom<Vec<u8>> for ChatroomFrames {
         let len = bytes.len() as u64;
         let mut cursor = std::io::Cursor::new(bytes);
         let mut frames = vec![];
-
         loop {
             let frame = ChatroomFrame::try_parse(&mut cursor)?;
             frames.push(frame);
@@ -157,7 +156,6 @@ impl TryFrom<Vec<u8>> for ChatroomFrames {
                 break;
             }
         }
-
         Ok(ChatroomFrames { frames })
     }
 }
@@ -1700,6 +1698,83 @@ mod test {
 
     #[test]
     fn test_try_from_chatroom_frames() {
-        todo!()
+        use tokio::sync::broadcast;
+        use async_std::channel;
+        use std::io::Cursor;
+
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+        let name = Arc::new(String::from("Test chatroom 666"));
+
+        let chatroom1 = Chatroom {
+            id,
+            name: name.clone(),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+        let name = Arc::new(String::from("Test chatroom 667"));
+
+        let chatroom2 = Chatroom {
+            id,
+            name: name.clone(),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        let id = Uuid::new_v4();
+        let (broadcast_sender, _) = broadcast::channel::<Response>(1);
+        let (chat_sender, _) = channel::unbounded::<Event>();
+        let name = Arc::new(String::from("Test chatroom 668"));
+
+        let chatroom3 = Chatroom {
+            id,
+            name: name.clone(),
+            client_subscriber:  broadcast_sender,
+            client_read_sender: chat_sender,
+            shutdown: None,
+            capacity: 4798,
+            num_clients: 2353,
+        };
+
+        // Create simulated lobby state
+        let mut lobby_state = vec![];
+        lobby_state.append(&mut chatroom1.as_bytes());
+        lobby_state.append(&mut chatroom2.as_bytes());
+        lobby_state.append(&mut chatroom3.as_bytes());
+
+        // let mut cursor = Cursor::new(lobby_state);
+
+        let chatroom_frames_res = ChatroomFrames::try_from(lobby_state);
+
+        println!("{:?}", chatroom_frames_res);
+
+        assert!(chatroom_frames_res.is_ok());
+
+        let chatroom_frames = chatroom_frames_res.unwrap();
+
+        println!("{:?}", chatroom_frames);
+
+        assert_eq!(chatroom_frames.frames[0].name.as_str(), chatroom1.name.as_str());
+        assert_eq!(chatroom_frames.frames[0].capacity, chatroom1.capacity);
+        assert_eq!(chatroom_frames.frames[0].num_clients, chatroom1.num_clients);
+
+        assert_eq!(chatroom_frames.frames[1].name.as_str(), chatroom2.name.as_str());
+        assert_eq!(chatroom_frames.frames[1].capacity, chatroom2.capacity);
+        assert_eq!(chatroom_frames.frames[1].num_clients, chatroom2.num_clients);
+
+        assert_eq!(chatroom_frames.frames[2].name.as_str(), chatroom3.name.as_str());
+        assert_eq!(chatroom_frames.frames[2].capacity, chatroom3.capacity);
+        assert_eq!(chatroom_frames.frames[2].num_clients, chatroom3.num_clients);
     }
 }
