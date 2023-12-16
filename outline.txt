@@ -123,6 +123,12 @@ Client:
             Page.display()
             Page.change_state()
 
+            Page: Holds needed data fields presenting the user with the current state. Manages state transition with
+            calls to state_from_response. i.e changes state based on the response received.
+            provides logic for accepting and forming requests from client input based on what state the page is in.
+
+
+
         Functionality:
             Main loop for interface:
                 -Bind connection

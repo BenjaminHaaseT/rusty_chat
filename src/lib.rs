@@ -139,7 +139,7 @@ impl ChatroomFrame {
 
 #[derive(Debug)]
 pub struct ChatroomFrames {
-    frames: Vec<ChatroomFrame>,
+    pub frames: Vec<ChatroomFrame>,
 }
 
 impl TryFrom<Vec<u8>> for ChatroomFrames {
@@ -1752,8 +1752,6 @@ mod test {
         lobby_state.append(&mut chatroom1.as_bytes());
         lobby_state.append(&mut chatroom2.as_bytes());
         lobby_state.append(&mut chatroom3.as_bytes());
-
-        // let mut cursor = Cursor::new(lobby_state);
 
         let chatroom_frames_res = ChatroomFrames::try_from(lobby_state);
 
