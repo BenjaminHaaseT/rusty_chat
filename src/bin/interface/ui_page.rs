@@ -4,7 +4,7 @@ use std::fmt::Display;
 use std::{print, println, panic, todo};
 use std::marker::Unpin;
 use async_std::{
-    io::{Read, ReadExt}
+    io::{Read, ReadExt, Write, WriteExt}
 };
 
 use crate::UserError;
@@ -29,11 +29,11 @@ impl UIPage {
         UIPage::WelcomePage
     }
 
-    pub async fn state_from_response<R: ReadExt + Unpin>(self, server_stream: R) -> Result<UIPage, UserError> {
-        let mut server_stream = server_stream;
+    pub async fn state_from_response<R: ReadExt + Unpin>(self, from_server: R) -> Result<UIPage, UserError> {
+        let mut from_server = from_server;
 
         // Attempt to parse a response from the given server stream
-        let response = Response::try_parse(&mut server_stream)
+        let response = Response::try_parse(&mut from_server)
             .await
             .map_err(|e| UserError::ParseResponse(e))?;
 
@@ -50,7 +50,6 @@ impl UIPage {
                 println!("{:-^80}", "Welcome to Rusty Chat!");
                 println!("A chatroom built with rust using a command line interface");
                 println!();
-                print!("Please enter your username: ");
                 // Return the next state that should be transitioned to
                 return Ok(UIPage::UsernamePage);
             },
@@ -59,7 +58,6 @@ impl UIPage {
                 match response {
                     Response::UsernameAlreadyExists { username} => {
                         println!("Sorry, but '{}' is already taken", username);
-                        println!("Please enter your username: ");
                         return Ok(UIPage::UsernamePage);
                     }
                     Response::UsernameOk { username, lobby_state} => {
@@ -96,7 +94,7 @@ impl UIPage {
                     Response::Subscribed {chatroom_name} => {
                         // Needs to start chatroom_prompt routine. First await for confirmation that
                         // client's read/write tasks are both connected to chatroom broker.
-                        let confirmation_response = Response::try_parse(&mut server_stream)
+                        let confirmation_response = Response::try_parse(&mut from_server)
                             .await
                             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
                         if !confirmation_response.is_read_sync() {
@@ -111,7 +109,7 @@ impl UIPage {
                     Response::ChatroomCreated {chatroom_name} => {
                         // Needs to start chatroom_prompt routine. First await for confirmation that
                         // client's read/write tasks are both connected to chatroom broker.
-                        let confirmation_response = Response::try_parse(&mut server_stream)
+                        let confirmation_response = Response::try_parse(&mut from_server)
                             .await
                             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
                         if !confirmation_response.is_read_sync() {
@@ -127,7 +125,7 @@ impl UIPage {
                     Response::ReadSync => {
                         // Needs to start chatroom_prompt routine. First await for confirmation that
                         // client's read/write tasks are both connected to chatroom broker.
-                        let confirmation_response = Response::try_parse(&mut server_stream)
+                        let confirmation_response = Response::try_parse(&mut from_server)
                             .await
                             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
 
@@ -214,6 +212,52 @@ impl UIPage {
             }
             _ => return Err(UserError::InternalServerError("an internal server error occurred")),
         }
+    }
+
+    pub async fn process_request<R: ReadExt + Unpin, W: WriteExt + Unpin>(&self, mut from_client: R, mut to_server: W, mut from_server: R) -> Result<(), UserError> {
+        // General idea: Display request prompt to client on stdout based on the current state of self
+        // Read client's input from 'from_client', parse accordingly with error handling.
+        // Then send request to server. Note that the state of self should only be 'UsernamePage', 'ChatroomPage', 'Lobby' or 'QuitChatroom'
+        match self {
+            UIPage::UsernamePage => {
+                // Prompt the user for a valid username. Use a loop to validate user has entered a
+                // valid username
+                let username = loop {
+                    println!("Please enter your username: ");
+                    let mut selected_username = String::new();
+
+                    from_client.read_to_string(&mut selected_username)
+                        .await
+                        .map_err(|_| UserError::ReadInput("input was unsuccessfully read"))?;
+
+                    if selected_username.is_empty() {
+                        println!("A valid username cannot be empty");
+                        continue;
+                    }
+                    // Ensure selected username's length can fit into a single byte
+                    if selected_username.len() > 255 {
+                        println!("Username: {} is too long. Chosen username must be between 1 and 255 characters in length", selected_username);
+                        continue;
+                    }
+                    break selected_username
+                };
+
+                // Create frame to send to the server
+                let frame = Frame::Username { new_username: username };
+
+                // Send frame to the server
+                to_server.write_all(frame.as_bytes().as_slice())
+                    .await
+                    .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
+
+                Ok(())
+            }
+            UIPage::LobbyPage {username, lobby_state} => {
+                todo!()
+            }
+            _ => todo!()
+        }
+
     }
 
 
