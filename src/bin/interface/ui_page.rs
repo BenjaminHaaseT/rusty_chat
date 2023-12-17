@@ -70,7 +70,7 @@ impl UIPage {
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                                 .map_err(|e| UserError::ParseLobby(e))?;
 
-                        chatroom_frames.frames.sort();
+                        chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
 
                         for frame in &chatroom_frames.frames {
                             println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
@@ -96,15 +96,12 @@ impl UIPage {
                     Response::Subscribed {chatroom_name} => {
                         // Needs to start chatroom_prompt routine. First await for confirmation that
                         // client's read/write tasks are both connected to chatroom broker.
-                        let _confirmation_response = Response::try_parse(&mut server_stream)
+                        let confirmation_response = Response::try_parse(&mut server_stream)
                             .await
-                            .map(|r| {
-                                match r {
-                                    Response::ReadSync => r,
-                                    _ => Err(UserError::InternalServerError("connection to chatroom failed"))
-                                }
-                            })?;
-
+                            .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+                        if !confirmation_response.is_read_sync() {
+                            return Err(UserError::InternalServerError("an internal server error occurred"));
+                        }
                         // Display message to client they have successfully connected to the chatroom
                         println!("You have successfully connected to {}", chatroom_name);
 
@@ -114,14 +111,12 @@ impl UIPage {
                     Response::ChatroomCreated {chatroom_name} => {
                         // Needs to start chatroom_prompt routine. First await for confirmation that
                         // client's read/write tasks are both connected to chatroom broker.
-                        let _confirmation_response = Response::try_parse(&mut server_stream)
+                        let confirmation_response = Response::try_parse(&mut server_stream)
                             .await
-                            .map(|r| {
-                                match r {
-                                    Response::ReadSync => r,
-                                    _ => Err(UserError::InternalServerError("connection to chatroom failed"))
-                                }
-                            })?;
+                            .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+                        if !confirmation_response.is_read_sync() {
+                            return Err(UserError::InternalServerError("an internal server error occurred"));
+                        }
 
                         // Display message to client they have successfully connected to the chatroom
                         println!("You have successfully created the chatroom {}", chatroom_name);
@@ -132,15 +127,15 @@ impl UIPage {
                     Response::ReadSync => {
                         // Needs to start chatroom_prompt routine. First await for confirmation that
                         // client's read/write tasks are both connected to chatroom broker.
-                        let chatroom_name = Response::try_parse(&mut server_stream)
+                        let confirmation_response = Response::try_parse(&mut server_stream)
                             .await
-                            .map(|r| {
-                                match r {
-                                    Response::Subscribed {chatroom_name} => chatroom_name,
-                                    Response::ChatroomCreated {chatroom_name} => chatroom_name,
-                                    _ => Err(UserError::InternalServerError("connection to chatroom failed"))
-                                }
-                            })?;
+                            .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+
+                        let chatroom_name = match confirmation_response {
+                            Response::ChatroomCreated {chatroom_name} => chatroom_name,
+                            Response::Subscribed {chatroom_name} => chatroom_name,
+                            _ => return Err(UserError::InternalServerError("an internal server error occurred")),
+                        };
 
                         // Display message to client they have successfully connected to the chatroom
                         println!("You have successfully connected to {}", chatroom_name);
@@ -155,7 +150,7 @@ impl UIPage {
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                             .map_err(|e| UserError::ParseLobby(e))?;
 
-                        chatroom_frames.frames.sort();
+                        chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
 
                         for frame in &chatroom_frames.frames {
                             println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
@@ -172,7 +167,7 @@ impl UIPage {
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                             .map_err(|e| UserError::ParseLobby(e))?;
 
-                        chatroom_frames.frames.sort();
+                        chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
 
                         for frame in &chatroom_frames.frames {
                             println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
@@ -202,7 +197,7 @@ impl UIPage {
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                             .map_err(|e| UserError::ParseLobby(e))?;
 
-                        chatroom_frames.frames.sort();
+                        chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
 
                         for frame in &chatroom_frames.frames {
                             println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
