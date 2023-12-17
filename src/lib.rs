@@ -379,6 +379,13 @@ impl Response {
         }
     }
 
+    pub fn is_read_sync(&self) -> bool {
+        match self {
+            Response::ReadSync => true,
+            _ => false
+        }
+    }
+
     // /// Helper method to reduce code duplication when serializing a `Response`
     // ///
     // /// Many `Response` variants have fields which have a length property that needs to be serialized.
