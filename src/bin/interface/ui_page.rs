@@ -4,8 +4,9 @@ use std::fmt::Display;
 use std::{print, println, panic, todo};
 use std::marker::Unpin;
 use async_std::{
-    io::{Read, ReadExt, Write, WriteExt}
+    io::{Read, ReadExt, Write, WriteExt, BufRead}
 };
+use async_std::io::prelude::BufReadExt;
 
 use crate::UserError;
 use rusty_chat::prelude::*;
@@ -68,14 +69,8 @@ impl UIPage {
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                                 .map_err(|e| UserError::ParseLobby(e))?;
 
-                        chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
-
-                        for frame in &chatroom_frames.frames {
-                            println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
-                        }
-
-                        println!();
-                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
+                        // Ensure frames are sorted by name
+                        chatroom_frames.frames.sort_by(|f1, f2| f1.name.cmp(&f2.name));
 
                         // Create new Lobby page and return
                         return Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames });
@@ -214,11 +209,14 @@ impl UIPage {
         }
     }
 
-    pub async fn process_request<R: ReadExt + Unpin, W: WriteExt + Unpin>(&self, mut from_client: R, mut to_server: W, mut from_server: R) -> Result<(), UserError> {
+    pub async fn process_request<B: BufReadExt + Unpin, R: ReadExt + Unpin, W: WriteExt + Unpin>(&self, from_client: B, mut to_server: W, mut from_server: R) -> Result<(), UserError> {
         // General idea: Display request prompt to client on stdout based on the current state of self
         // Read client's input from 'from_client', parse accordingly with error handling.
         // Then send request to server. Note that the state of self should only be 'UsernamePage', 'ChatroomPage', 'Lobby' or 'QuitChatroom'
+        let mut from_client = from_client.lines();
         match self {
+            // If this matches, we know client has successfully connected to the server.
+            // So client needs to be prompted to enter a username.
             UIPage::UsernamePage => {
                 // Prompt the user for a valid username. Use a loop to validate user has entered a
                 // valid username
@@ -226,14 +224,16 @@ impl UIPage {
                     println!("Please enter your username: ");
                     let mut selected_username = String::new();
 
-                    from_client.read_to_string(&mut selected_username)
+                    from_client.read_line(&mut selected_username)
                         .await
-                        .map_err(|_| UserError::ReadInput("input was unsuccessfully read"))?;
+                        .map_err(|_| UserError::ReadInput("error reading input from standard in"))?;
 
                     if selected_username.is_empty() {
                         println!("A valid username cannot be empty");
                         continue;
                     }
+                    // Trim new line character
+                    // let selected_username = selected_username.trim_end_matches('\n').to_string();
                     // Ensure selected username's length can fit into a single byte
                     if selected_username.len() > 255 {
                         println!("Username: {} is too long. Chosen username must be between 1 and 255 characters in length", selected_username);
@@ -252,10 +252,118 @@ impl UIPage {
 
                 Ok(())
             }
+
+            // If this matches, the client has successfully set their username and is now in
+            // the lobby of the chatroom server. We need to display the state of the lobby and
+            // prompt for users input.
             UIPage::LobbyPage {username, lobby_state} => {
+                for frame in &lobby_state.frames {
+                    println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
+                }
+
+                println!();
+                println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
+
+                // Get users input
+                // let mut users_request = String::new();
+                let users_request = loop {
+                    let mut buf = String::new();
+                    from_client.read_line(&mut buf)
+                        .await
+                        .map_err(|_| UserError::ReadInput("error reading input from standard in"))?;
+                    if buf.is_empty() {
+                        println!("please enter valid input");
+                        println!();
+                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
+                        println!();
+                        continue;
+                    }
+                    // Remove line break
+                    // let buf = buf.trim_end_matches('\n').to_string();
+
+                    // Validate user has entered a valid chatroom name if the buffers length is greater than 1
+                    // chatroom names cannot have a length greater than 255
+                    if buf.len() > 255 {
+                        println!("the chatroom name you entered is too long");
+                        println!("please enter valid input");
+                        println!();
+                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
+                        println!();
+                    } else if buf.len() > 1 && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
+                        println!("chatroom {} does not exist", buf);
+                        println!("please enter valid input");
+                        println!();
+                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
+                        println!();
+                    } else if buf.len() == 1 && buf != "q" && buf != "c" {
+                        println!("please enter valid input");
+                        println!();
+                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
+                        println!();
+                    } else {
+                        break buf;
+                    }
+                };
+
+                // We can be sure that the user has entered valid input from here, so we can send the
+                // request to the server
+                match users_request.as_str() {
+                    "q" => {
+                        // Client is electing to quit altogether
+                        to_server.write_all(&Frame::Quit.as_bytes())
+                            .await
+                            .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
+                    },
+                    "c" => {
+                        // Validation loop pattern for getting users selected chatroom name
+                        let chatroom_name = loop {
+                            println!("enter chatroom name:");
+                            let mut buf = String::new();
+                            from_client.read_line(&mut buf)
+                                .await
+                                .map_err(|_| UserError::ReadInput("error reading input from standard in"))?;
+                            // let buf = buf.trim_end_matches('\n').to_string();
+                            if buf.is_empty() {
+                                println!("chatroom name cannot be empty, please enter valid input.");
+                            } else if buf.len() > 255 {
+                                println!("chatroom name length cannot exceed 255 characters, please enter valid input.");
+                            } else {
+                                break buf;
+                            }
+                        };
+                        // We can be sure the client has entered a valid chatroom name from here
+                        // Send the frame to the server
+                        to_server.write_all(&Frame::Create { chatroom_name }.as_bytes())
+                            .await
+                            .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
+                    },
+                    chatroom_name=> {
+                        to_server.write_all(&Frame::Join { chatroom_name: chatroom_name.to_string() }.as_bytes())
+                            .await
+                            .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
+                    },
+                    _ => unreachable!()
+                }
+
+                // We have successfully sent a frame to the server
+                Ok(())
+            }
+
+            // If this matches, the client has successfully created/joined a new chatroom
+            // the chatroom procedure needs to be executed from this branch.
+            UIPage::Chatroom {username, chatroom_name} => {
                 todo!()
             }
-            _ => todo!()
+
+            // If this matches, the client has successfully quit from a chatroom.
+            UIPage::QuitChatroom {username, chatroom_name} => {
+                // Client just needs to send a request to server to refresh their lobby state
+                println!("Re-entering lobby...");
+                to_server.write_all(&Frame::Lobby.as_bytes())
+                    .await
+                    .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
+            }
+            _ => unreachable!()
         }
 
     }
