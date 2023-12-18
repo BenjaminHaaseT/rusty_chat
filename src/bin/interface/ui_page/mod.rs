@@ -11,6 +11,9 @@ use async_std::io::prelude::BufReadExt;
 use crate::UserError;
 use rusty_chat::prelude::*;
 
+mod chat;
+use crate::interface::ui_page::chat::prelude::*;
+
 /// A state machine that represents all pages of the UI.
 ///
 /// `UIPage` is a state machine that keeps track of the logic and state for each stage
@@ -67,7 +70,7 @@ impl UIPage {
 
                         // Parse the lobby state
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
-                                .map_err(|e| UserError::ParseLobby(e))?;
+                            .map_err(|e| UserError::ParseLobby(e))?;
 
                         // Ensure frames are sorted by name
                         chatroom_frames.frames.sort_by(|f1, f2| f1.name.cmp(&f2.name));
