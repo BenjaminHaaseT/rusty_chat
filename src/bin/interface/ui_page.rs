@@ -209,11 +209,11 @@ impl UIPage {
         }
     }
 
-    pub async fn process_request<B: BufReadExt + Unpin, R: ReadExt + Unpin, W: WriteExt + Unpin>(&self, from_client: B, mut to_server: W, mut from_server: R) -> Result<(), UserError> {
+    pub async fn process_request<B: BufRead + BufReadExt + Unpin, R: ReadExt + Unpin, W: WriteExt + Unpin>(&self, from_client: B, mut to_server: W, mut from_server: R) -> Result<(), UserError> {
         // General idea: Display request prompt to client on stdout based on the current state of self
         // Read client's input from 'from_client', parse accordingly with error handling.
         // Then send request to server. Note that the state of self should only be 'UsernamePage', 'ChatroomPage', 'Lobby' or 'QuitChatroom'
-        let mut from_client = from_client.lines();
+        let mut from_client = from_client;
         match self {
             // If this matches, we know client has successfully connected to the server.
             // So client needs to be prompted to enter a username.
@@ -362,6 +362,7 @@ impl UIPage {
                 to_server.write_all(&Frame::Lobby.as_bytes())
                     .await
                     .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
+                Ok(())
             }
             _ => unreachable!()
         }
