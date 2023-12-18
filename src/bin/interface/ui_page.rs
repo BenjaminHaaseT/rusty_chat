@@ -223,33 +223,23 @@ impl UIPage {
                 let username = loop {
                     println!("Please enter your username: ");
                     let mut selected_username = String::new();
-
                     from_client.read_line(&mut selected_username)
                         .await
                         .map_err(|_| UserError::ReadInput("error reading input from standard in"))?;
-
                     if selected_username.is_empty() {
-                        println!("A valid username cannot be empty");
-                        continue;
+                        println!("selected username cannot be empty");
+                    } else if selected_username.len() > 255 {
+                        println!("selected username length cannot exceed 255 characters");
+                    } else {
+                        break selected_username;
                     }
-                    // Trim new line character
-                    // let selected_username = selected_username.trim_end_matches('\n').to_string();
-                    // Ensure selected username's length can fit into a single byte
-                    if selected_username.len() > 255 {
-                        println!("Username: {} is too long. Chosen username must be between 1 and 255 characters in length", selected_username);
-                        continue;
-                    }
-                    break selected_username
                 };
-
                 // Create frame to send to the server
                 let frame = Frame::Username { new_username: username };
-
                 // Send frame to the server
-                to_server.write_all(frame.as_bytes().as_slice())
+                to_server.write_all(&frame.as_bytes())
                     .await
                     .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
-
                 Ok(())
             }
 
@@ -260,51 +250,46 @@ impl UIPage {
                 for frame in &lobby_state.frames {
                     println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
                 }
-
                 println!();
                 println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
-
                 // Get users input
-                // let mut users_request = String::new();
                 let users_request = loop {
                     let mut buf = String::new();
                     from_client.read_line(&mut buf)
                         .await
                         .map_err(|_| UserError::ReadInput("error reading input from standard in"))?;
+                    // Ensure buf is not empty
                     if buf.is_empty() {
                         println!("please enter valid input");
                         println!();
                         println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                         println!();
-                        continue;
-                    }
-                    // Remove line break
-                    // let buf = buf.trim_end_matches('\n').to_string();
-
-                    // Validate user has entered a valid chatroom name if the buffers length is greater than 1
-                    // chatroom names cannot have a length greater than 255
-                    if buf.len() > 255 {
+                    } else if buf.len() > 255 {
+                        // Validate user has entered a valid chatroom name if the buffers length is greater than 1
+                        // chatroom names cannot have a length greater than 255
                         println!("the chatroom name you entered is too long");
                         println!("please enter valid input");
                         println!();
                         println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                         println!();
                     } else if buf.len() > 1 && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
+                        // Ensure the selected chatroom name exists in the current lobby state
                         println!("chatroom {} does not exist", buf);
                         println!("please enter valid input");
                         println!();
                         println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                         println!();
                     } else if buf.len() == 1 && buf != "q" && buf != "c" {
+                        // Ensure a valid command was entered
                         println!("please enter valid input");
                         println!();
                         println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                         println!();
                     } else {
+                        // Valid input, break
                         break buf;
                     }
                 };
-
                 // We can be sure that the user has entered valid input from here, so we can send the
                 // request to the server
                 match users_request.as_str() {
@@ -322,7 +307,6 @@ impl UIPage {
                             from_client.read_line(&mut buf)
                                 .await
                                 .map_err(|_| UserError::ReadInput("error reading input from standard in"))?;
-                            // let buf = buf.trim_end_matches('\n').to_string();
                             if buf.is_empty() {
                                 println!("chatroom name cannot be empty, please enter valid input.");
                             } else if buf.len() > 255 {
@@ -344,7 +328,6 @@ impl UIPage {
                     },
                     _ => unreachable!()
                 }
-
                 // We have successfully sent a frame to the server
                 Ok(())
             }
