@@ -17,7 +17,7 @@ pub mod prelude {
 
 pub enum Null {}
 
-pub async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) -> Result<(), UserError> {
+async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) -> Result<(), UserError> {
     // Get asynchronous stream of key events
     let mut keyboard = stream::iter(async_stdin().keys()).fuse();
     // For writing to the console
@@ -160,6 +160,10 @@ where
                     None => {
                         //TODO: log shutdown signal
                         println!("shutting down chat-window task");
+                        // Send quit frame to server
+                        to_server.write_all(&Frame::Quit.as_bytes())
+                            .await
+                            .map_err(|e| UserError::WriteError(e))?;
                         break;
                     }
                 }
@@ -184,6 +188,13 @@ where
             row -= 1;
         }
     }
+
+    // Reset cursor
+    let mut guard = stdout.lock();
+    write!(guard, "{}{}{:?}{}", cursor::Goto(1, 1), clear::All, color::Reset, cursor::Show)
+        .map_err(|e| UserError::WriteError(e))?;
+    guard.flush()
+        .map_err(|e| UserError::WriteError(e))?;
 
     Ok(())
 }

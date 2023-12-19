@@ -12,7 +12,8 @@ use crate::UserError;
 use rusty_chat::prelude::*;
 
 mod chat;
-use crate::interface::ui_page::chat::prelude::*;
+use chat::prelude::*;
+// use crate::interface::ui_page::chat::prelude::*;
 
 /// A state machine that represents all pages of the UI.
 ///
@@ -212,11 +213,18 @@ impl UIPage {
         }
     }
 
-    pub async fn process_request<B: BufRead + BufReadExt + Unpin, R: ReadExt + Unpin, W: WriteExt + Unpin>(&self, from_client: B, mut to_server: W, mut from_server: R) -> Result<(), UserError> {
+    pub async fn process_request<B, R, W>(&self, from_client: &mut B, to_server: W, from_server: R) -> Result<(), UserError>
+    where
+        B: BufRead + BufReadExt + Unpin,
+        R: ReadExt + Unpin,
+        W: WriteExt + Unpin,
+    {
         // General idea: Display request prompt to client on stdout based on the current state of self
         // Read client's input from 'from_client', parse accordingly with error handling.
         // Then send request to server. Note that the state of self should only be 'UsernamePage', 'ChatroomPage', 'Lobby' or 'QuitChatroom'
-        let mut from_client = from_client;
+        // let mut from_client = from_client;
+        let mut to_server = to_server;
+        let mut from_server = from_server;
         match self {
             // If this matches, we know client has successfully connected to the server.
             // So client needs to be prompted to enter a username.
@@ -338,7 +346,10 @@ impl UIPage {
             // If this matches, the client has successfully created/joined a new chatroom
             // the chatroom procedure needs to be executed from this branch.
             UIPage::Chatroom {username, chatroom_name} => {
-                todo!()
+                // Start the chatroom procedure
+                chat_window_task(username, chatroom_name, &mut from_server, &mut to_server).await?;
+                println!("Leaving chatroom {}...", chatroom_name);
+                Ok(())
             }
 
             // If this matches, the client has successfully quit from a chatroom.
@@ -352,7 +363,6 @@ impl UIPage {
             }
             _ => unreachable!()
         }
-
     }
 
 
