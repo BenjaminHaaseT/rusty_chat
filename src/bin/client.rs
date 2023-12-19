@@ -5,8 +5,8 @@ enum UserError {
     InternalServerError(&'static str),
     ParseLobby(&'static str),
     ReadInput(&'static str),
-    RawOutput(&'static str),
-    WriteError(String),
+    RawOutput(std::io::Error),
+    WriteError(std::io::Error),
     SendError(&'static str),
 }
 
