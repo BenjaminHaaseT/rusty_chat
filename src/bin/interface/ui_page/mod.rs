@@ -36,9 +36,10 @@ impl UIPage {
 
     /// The state transition function.
     ///
-    /// Takes a connection to a server `from_server`, attempts to parse a response received and
+    /// Takes ownership of 'self' and a connection to a server `from_server`, attempts to parse a response received and
     /// executes the associated logic for transitioning the the UI to the next state based on the response
-    /// received.
+    /// received. This method consumes 'self' and returns the next state of the UI after the appropriate logic
+    /// is executed.
     pub async fn state_from_response<R: ReadExt + Unpin>(self, from_server: R) -> Result<UIPage, UserError> {
         // So it can be read from
         let mut from_server = from_server;
@@ -201,6 +202,14 @@ impl UIPage {
         }
     }
 
+    /// Processes a request from the client based on the current state of 'self'.
+    ///
+    /// Gets input from the client, validates the input based on the current state of 'self' and then
+    /// writes the appropriate 'Frame' to 'to_server'.
+    /// Takes three input streams, 'from_client' for client input, 'to_server' for sending 'Frames' to
+    /// the server, and 'from_server' for receiving responses from the server. Note 'from_server' is
+    /// used whenever the 'UIPage' is in the 'Chatroom' state, so the chatroom procedure can be run.
+    ///
     pub async fn process_request<B, R, W>(&self, from_client: &mut B, to_server: W, from_server: R) -> Result<(), UserError>
     where
         B: BufRead + BufReadExt + Unpin,
