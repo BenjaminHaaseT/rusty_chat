@@ -62,13 +62,16 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     // Id for the client
     let peer_id = Uuid::new_v4();
 
-    // channel for synchronizing graceful shutdown with the client's writer task
+    // Channel for synchronizing graceful shutdown with the client's writer task,
+    // when this tasks finishes, _client_shutdown_sender will be dropped signalling to client_shutdown_receiver
+    // that the client has disconnected
     let (_client_shutdown_sender, client_shutdown_receiver) = channel::unbounded::<Null>();
 
-    // channel for receiving new chatroom-sub-broker connections from the main broker
+    // Channel for receiving new chatroom-sub-broker connections from the main broker.
+    // Receives a 'Sender<Event>' when the client has joined a new chatroom
     let (chatroom_broker_sender, chatroom_broker_receiver) = channel::unbounded::<AsyncStdSender<Event>>();
 
-    // new client event
+    // New client event
     let event = Event::NewClient {
         peer_id,
         stream: client_stream.clone(),
@@ -76,7 +79,7 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
         chatroom_connection: chatroom_broker_sender
     };
 
-    // send a new client event to the main broker, should not be disconnected
+    // Send a new client event to the main broker, should not be disconnected
     main_broker_sender.send(event)
         .await
         .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send event to main broker", peer_id)))?;
@@ -85,8 +88,9 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     // variant when the client is inside a chatroom
     let mut chatroom_sender: Option<AsyncStdSender<Event>> = None;
 
-    // Shadow client_reader to it can be read from
+    // Shadow client_reader as mutable to it can be read from
     let mut client_reader = client_reader;
+
     // Fuse so it can be selected over
     let mut chatroom_broker_receiver = chatroom_broker_receiver.fuse();
 
@@ -94,13 +98,14 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
         // We need to listen to 2 potential events, we receive input from the client's stream
         // or we receive a sending part of a chatroom broker task
         let frame = select! {
-            // read input from client
+            // Read input from client
             res = Frame::try_parse(&mut client_reader).fuse() => {
                 match res {
                     Ok(frame) => frame,
                     Err(e) => return Err(ServerError::ParseFrame(format!("client {} unable to parse frame in handle connection task", peer_id))),
                 }
             },
+            // Receive a new connection to a chatroom-sub broker task
             chatroom_sender_opt = chatroom_broker_receiver.next().fuse() => {
                 match chatroom_sender_opt {
                     Some(chatroom_channel) => {
@@ -118,7 +123,6 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
                 }
             },
         };
-
         // If we have a chatroom sender channel, we assume all parsed events are being sent to the
         // current chatroom, otherwise we send events to main broker
         if let Some(chat_sender) = chatroom_sender.take() {
@@ -128,18 +132,17 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
                     // client no longer desires to be in this chatroom
                     chat_sender.send(Event::Quit {peer_id})
                         .await
-                        .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send event to main broker", peer_id)))?;
+                        .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send event to chatroom broker", peer_id)))?;
                 }
                 Frame::Message {message} => {
                     chat_sender.send(Event::Message {message, peer_id})
                         .await
-                        .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send event to main broker", peer_id)))?;
+                        .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send event to chatroom broker", peer_id)))?;
                     // place chat_sender back into chatroom_sender
                     chatroom_sender = Some(chat_sender);
                 }
                 _ => return Err(ServerError::IllegalFrame(format!("client {} handle connection task received an illegal frame: {:?}", peer_id, frame))),
             }
-
         } else {
             match frame {
                 Frame::Quit =>  {
