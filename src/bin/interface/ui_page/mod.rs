@@ -358,5 +358,12 @@ impl UIPage {
         }
     }
 
+    pub fn is_quit_lobby(&self) -> bool {
+        match self {
+            UIPage::QuitLobbyPage => true,
+            _ => false
+        }
+    }
+
 
 }

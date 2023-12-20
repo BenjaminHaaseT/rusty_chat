@@ -130,7 +130,8 @@ where
     // Fuse receivers so they can be used in a select loop
     let mut keyboard_recv = keyboard_recv.fuse();
     let mut keyboard_shutdown_recv = keyboard_shutdown_recv.fuse();
-    // Shadow as mutable
+
+    // Shadow as mutable so read/writes happen
     let mut from_server = from_server;
     let mut to_server = to_server;
 

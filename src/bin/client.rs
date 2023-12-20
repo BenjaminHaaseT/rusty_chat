@@ -9,6 +9,7 @@ enum UserError {
     RawOutput(std::io::Error),
     WriteError(std::io::Error),
     SendError(&'static str),
+    ConnectionError(std::io::Error),
 }
 
 fn main() {
