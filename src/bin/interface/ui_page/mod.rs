@@ -34,10 +34,16 @@ impl UIPage {
         UIPage::WelcomePage
     }
 
+    /// The state transition function.
+    ///
+    /// Takes a connection to a server `from_server`, attempts to parse a response received and
+    /// executes the associated logic for transitioning the the UI to the next state based on the response
+    /// received.
     pub async fn state_from_response<R: ReadExt + Unpin>(self, from_server: R) -> Result<UIPage, UserError> {
+        // So it can be read from
         let mut from_server = from_server;
 
-        // Attempt to parse a response from the given server stream
+        // Attempt to parse a response from the given connection
         let response = Response::try_parse(&mut from_server)
             .await
             .map_err(|e| UserError::ParseResponse(e))?;
@@ -56,7 +62,7 @@ impl UIPage {
                 println!("A command line chatroom");
                 println!();
                 // Return the next state that should be transitioned to
-                return Ok(UIPage::UsernamePage);
+                Ok(UIPage::UsernamePage)
             },
             UIPage::UsernamePage => {
                 println!("{}", "-".repeat(80));
@@ -145,7 +151,6 @@ impl UIPage {
                         }
                     }
                     Response::ChatroomDoesNotExist {chatroom_name, lobby_state} => {
-                        println!("{}", "-".repeat(80));
                         println!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name);
                         // Parse the lobby state
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
@@ -154,7 +159,6 @@ impl UIPage {
                         Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames})
                     }
                     Response::ChatroomAlreadyExists {chatroom_name, lobby_state} => {
-                        println!("{}", "-".repeat(80));
                         println!("Unable to create chatroom {}, chatroom: {} already exists. Please select another option.", chatroom_name, chatroom_name);
                         // Parse the lobby state
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
@@ -167,6 +171,8 @@ impl UIPage {
                 }
             }
             UIPage::Chatroom {username, chatroom_name} => {
+                // We just need to ensure the client receives a ExitChatroom response
+                // and return a QuitChatroom variant,
                 print!("...");
                 match response {
                     Response::ExitChatroom {chatroom_name} => {
@@ -177,6 +183,7 @@ impl UIPage {
                 }
             }
             UIPage::QuitChatroom {username, chatroom_name} => {
+                println!("Entering lobby...");
                 match response {
                     Response::Lobby {lobby_state} => {
                         // Parse the lobby state
@@ -217,13 +224,13 @@ impl UIPage {
                     let mut selected_username = String::new();
                     from_client.read_line(&mut selected_username)
                         .await
-                        .map_err(|_| UserError::ReadInput("error reading input from standard in"))?;
+                        .map_err(|e| UserError::ReadError(e))?;
                     // Ensure we remove leading/trailing white space
                     let selected_username = selected_username.trim().to_owned();
                     if selected_username.is_empty() {
                         println!("selected username cannot be empty");
-                    } else if selected_username.len() > 255 {
-                        println!("selected username length cannot exceed 255 characters");
+                    } else if selected_username.as_bytes().len() > 255 {
+                        println!("selected username length cannot exceed 255 bytes");
                     } else {
                         break selected_username;
                     }
@@ -241,13 +248,13 @@ impl UIPage {
             // the lobby of the chatroom server. We need to display the state of the lobby and
             // prompt for users input.
             UIPage::LobbyPage {username, lobby_state} => {
-                for frame in &lobby_state.frames {
-                    println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
-                }
-                println!();
-                println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                 // Get users input
                 let users_request = loop {
+                    for frame in &lobby_state.frames {
+                        println!("{}: {}/{}", frame.name, frame.num_clients, frame.capacity);
+                    }
+                    println!();
+                    println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                     let mut buf = String::new();
                     from_client.read_line(&mut buf)
                         .await
@@ -255,30 +262,22 @@ impl UIPage {
                     let buf = buf.trim().to_owned();
                     // Ensure buf is not empty
                     if buf.is_empty() {
-                        println!("please enter valid input");
+                        println!("please enter valid input, input cannot be empty");
                         println!();
-                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
-                        println!();
-                    } else if buf.len() > 255 {
+                    } else if buf.as_bytes().len() > 255 {
                         // Validate user has entered a valid chatroom name if the buffers length is greater than 1
                         // chatroom names cannot have a length greater than 255
-                        println!("the chatroom name you entered is too long");
+                        println!("the chatroom name you entered is too long, length cannot exceed 255 bytes");
                         println!("please enter valid input");
-                        println!();
-                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                         println!();
                     } else if buf.len() > 1 && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
                         // Ensure the selected chatroom name exists in the current lobby state
                         println!("chatroom {} does not exist", buf);
                         println!("please enter valid input");
                         println!();
-                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
-                        println!();
                     } else if buf.len() == 1 && buf != "q" && buf != "c" {
                         // Ensure a valid command was entered
                         println!("please enter valid input");
-                        println!();
-                        println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                         println!();
                     } else {
                         // Valid input, break
@@ -301,12 +300,12 @@ impl UIPage {
                             let mut buf = String::new();
                             from_client.read_line(&mut buf)
                                 .await
-                                .map_err(|_| UserError::ReadInput("error reading input from standard in"))?;
+                                .map_err(|e| UserError::ReadError(e))?;
                             let buf = buf.trim().to_owned();
                             if buf.is_empty() {
                                 println!("chatroom name cannot be empty, please enter valid input.");
-                            } else if buf.len() > 255 {
-                                println!("chatroom name length cannot exceed 255 characters, please enter valid input.");
+                            } else if buf.as_bytes().len() > 255 {
+                                println!("chatroom name length cannot exceed 255 bytes, please enter valid input.");
                             } else {
                                 break buf;
                             }
@@ -332,6 +331,7 @@ impl UIPage {
             UIPage::Chatroom {username, chatroom_name} => {
                 // Start the chatroom procedure
                 chat_window_task(username, chatroom_name, &mut from_server, &mut to_server).await?;
+                // client has left
                 println!("Leaving chatroom {}...", chatroom_name);
                 Ok(())
             }
