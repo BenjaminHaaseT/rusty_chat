@@ -13,7 +13,6 @@ use rusty_chat::prelude::*;
 
 mod chat;
 use chat::prelude::*;
-// use crate::interface::ui_page::chat::prelude::*;
 
 /// A state machine that represents all pages of the UI.
 ///

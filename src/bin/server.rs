@@ -11,7 +11,7 @@ use async_std::task;
 use tokio::sync::broadcast;
 
 use futures::{
-    future::{Future, FutureExt,  FusedFuture, Fuse},
+    future::{Future, FutureExt,  FusedFuture},
     stream::{Stream, StreamExt, FusedStream},
     select,
 };
@@ -27,18 +27,21 @@ use rusty_chat::{*, Event, Null};
 mod chatroom_task;
 mod server_error;
 
+/// The accept loop for the server. Binds a 'TcpListener' to the supplied 'server_addrs', awaits
+/// incoming client connections and spawns them onto new tasks for handling connections.
 async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_buf_size: usize) -> Result<(), ServerError> {
     println!("listening at {:?}...", server_addrs);
-
+    // Connect the supplied address
     let mut listener = TcpListener::bind(server_addrs.clone())
         .await
         .map_err(|_| ServerError::ConnectionFailed(format!("unable to bind listener at address {:?}", server_addrs)))?;
-
+    // For communicating with the main broker
     let (broker_sender, broker_receiver) = channel::bounded::<Event>(channel_buf_size);
 
     // spawn broker task
-    task::spawn(broker(broker_receiver));
+    let _broker_handle = task::spawn(broker(broker_receiver));
 
+    // Listen for incoming client connections
     while let Some(stream) = listener.incoming().next().await {
         // TODO: log error in this case do not return
         let stream = stream.map_err(|e| ServerError::ConnectionFailed(format!("accept loop received an error: {:?}", e)))?;
@@ -49,8 +52,11 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
     Ok(())
 }
 
+
 async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: TcpStream) -> Result<(), ServerError> {
+    // Move into an arc, so it can be shared between read/write tasks
     let client_stream = Arc::new(client_stream);
+    // strictly for reading from the client
     let mut client_reader = &*client_stream;
 
     // Id for the client
