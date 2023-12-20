@@ -1,5 +1,7 @@
 mod interface;
 
+use interface::prelude::*;
+
 enum UserError {
     ParseResponse(&'static str),
     InternalServerError(&'static str),

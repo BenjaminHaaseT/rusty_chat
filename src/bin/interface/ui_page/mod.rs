@@ -21,15 +21,28 @@ use chat::prelude::*;
 /// of a clients interaction with the chatroom server.
 #[derive(Debug)]
 pub enum UIPage {
+    /// Initial page the client will see first in the progression
     WelcomePage,
+
+    /// Page that represents the username prompt
     UsernamePage,
+
+    /// Page that represents the state when the client is inside the lobby
     LobbyPage { username: String, lobby_state: ChatroomFrames },
+
+    /// Page that represents the state when the client is inside a chatroom
     Chatroom { username: String, chatroom_name: String},
+
+    /// Represents the state when the client has quit a chatroom and is rejoining the lobby
     QuitChatroom { username: String, chatroom_name: String },
+
+    /// Represents the state that signals the client has quit the chatroom program altogether
     QuitLobbyPage,
 }
 
 impl UIPage {
+    /// Returns a new 'UIPage'. Always returns the 'WelcomePage' variant since this is the
+    /// first page that every client should see.
     pub fn new() -> UIPage {
         UIPage::WelcomePage
     }
@@ -358,6 +371,7 @@ impl UIPage {
         }
     }
 
+    /// Returns true if the 'UIPage' is the 'QuitLobbyPage' variant, false otherwise.
     pub fn is_quit_lobby(&self) -> bool {
         match self {
             UIPage::QuitLobbyPage => true,

@@ -10,6 +10,10 @@ use crate::UserError;
 
 mod ui_page;
 
+pub mod prelude {
+    pub use super::*;
+}
+
 
 /// Encapsulates the client UI functionality
 pub struct Interface;
