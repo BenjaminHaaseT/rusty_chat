@@ -27,7 +27,8 @@ use rusty_chat::{*, Event, Null};
 mod chatroom_task;
 mod server_error;
 
-/// The accept loop for the server. Binds a 'TcpListener' to the supplied 'server_addrs', awaits
+/// The accept loop for the server. Binds a 'TcpListener' to 'server_addrs', spawns the main
+/// broker task which acts as the brain of the chatroom server, awaits
 /// incoming client connections and spawns them onto new tasks for handling connections.
 async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_buf_size: usize) -> Result<(), ServerError> {
     println!("listening at {:?}...", server_addrs);
@@ -52,7 +53,11 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
     Ok(())
 }
 
-
+/// Processes a new client connection.
+///
+/// Takes 'client_stream' for parsing events triggered by the client and
+/// for writing responses back to the client from the server. 'main_broker_sender' is used for sending
+/// events triggered by the client to the main broker task.
 async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: TcpStream) -> Result<(), ServerError> {
     // Move into an arc, so it can be shared between read/write tasks
     let client_stream = Arc::new(client_stream);
@@ -62,9 +67,11 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     // Id for the client
     let peer_id = Uuid::new_v4();
 
-    // Channel for synchronizing graceful shutdown with the client's writer task,
-    // when this tasks finishes, _client_shutdown_sender will be dropped signalling to client_shutdown_receiver
-    // that the client has disconnected
+    // Channel for synchronizing graceful shutdown with the client's writer task. client_shutdown_receiver,
+    // will be sent to the main broker task as part of a Event::NewClient so when the broker spawns,
+    // this client's write task, the write task will be synchronized with this task when shutdown needs to occur.
+    // When this tasks finishes, _client_shutdown_sender will be dropped signalling to client_shutdown_receiver
+    // that the client has disconnected.
     let (_client_shutdown_sender, client_shutdown_receiver) = channel::unbounded::<Null>();
 
     // Channel for receiving new chatroom-sub-broker connections from the main broker.
@@ -87,9 +94,6 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     // for sending message events when the client joins a new chatroom. Only set to 'Some'
     // variant when the client is inside a chatroom
     let mut chatroom_sender: Option<AsyncStdSender<Event>> = None;
-
-    // Shadow client_reader as mutable to it can be read from
-    let mut client_reader = client_reader;
 
     // Fuse so it can be selected over
     let mut chatroom_broker_receiver = chatroom_broker_receiver.fuse();
@@ -124,7 +128,9 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
             },
         };
         // If we have a chatroom sender channel, we assume all parsed events are being sent to the
-        // current chatroom, otherwise we send events to main broker
+        // current chatroom, otherwise we send events to main broker. This necessarily means
+        // an invariant needs to be enforced by the client, that all Frames sent to the server after
+        // joining/creating a chatroom are only Message/Quit variants.
         if let Some(chat_sender) = chatroom_sender.take() {
             match frame {
                 Frame::Quit => {
@@ -150,6 +156,8 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
                         .await
                         .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send event to main broker", peer_id)))?;
                     // We are quiting the program all together at this point
+                    // TODO: Log instead
+                    println!("client {} shutting down", peer_id);
                     break;
                 },
                 Frame::Lobby => {
@@ -180,7 +188,13 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
     Ok(())
 }
 
-
+/// The task that will receive 'Response's from a broker and write them to the client's TcpStream.
+///
+/// Takes 'client_id' for filtering messages received from a chatroom sub-broker, 'client_stream'
+/// for writing (only for writing) 'Response's, 'main_broker_receiver' for receiving 'Response's from
+/// the main broker task, 'chatroom_broker_receiver' for receiving 'Response's from a chatroom sub-broker
+/// task and 'shutdown' a channel used exclusively for signalling graceful shutdown with this client's
+/// read task.
 async fn client_write_loop(
     client_id: Uuid,
     client_stream: Arc<TcpStream>,
@@ -188,11 +202,12 @@ async fn client_write_loop(
     chatroom_broker_receiver: &mut AsyncStdReceiver<(TokioBroadcastReceiver<Response>, Response)>,
     shutdown: AsyncStdReceiver<Null>,
 ) -> Result<(), ServerError> {
-    println!("inside client write loop");
+    // println!("inside client write loop");
     // Shadow client stream so it can be written to
     let mut client_stream = &*client_stream;
 
-    // The broker for the chatroom, yet to be set, will yield poll pending until it is reset
+    // The broker for the chatroom, yet to be set, will yield poll pending until a chatroom sub-broker
+    // subscription is received from chatroom_broker_receiver
     let (mut dummy_chat_sender, chat_receiver) = tokio::sync::broadcast::channel::<Response>(100);
     let mut chat_receiver = BroadcastStream::new(chat_receiver).fuse();
 
@@ -202,12 +217,13 @@ async fn client_write_loop(
     let mut shutdown = shutdown.fuse();
 
     loop {
-        // Select over possible receiving options
+        // Select over possible receiving options, we can receive a shutdown signal from the clients
+        // read task, a response from the main broker, a response from a chatroom sub-broker task or
+        // a new connection to a chatroom sub-broker task.
         let response: Response = select! {
-
             // Check for a disconnection event
             null = shutdown.next().fuse() => {
-                println!("Client write loop shutting down");
+                println!("Client {} write loop shutting down", client_id);
                 match null {
                     Some(null) => match null {},
                     _ => break,
@@ -218,6 +234,7 @@ async fn client_write_loop(
             resp = main_broker_receiver.next().fuse() => {
                 match resp {
                     Some(resp) => {
+                        // Check if client is exiting from a chatroom
                         if resp.is_exit_chatroom() {
                             // Create new dummy channel to replace old chatroom_broker channel
                             let (new_dummy_chat_sender, new_chat_receiver) = broadcast::channel::<Response>(100);
@@ -225,6 +242,7 @@ async fn client_write_loop(
                             dummy_chat_sender = new_dummy_chat_sender;
                             chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
                         }
+                        // forward response sent from main broker so it can be written back to the client
                         resp
                     },
                     None => {
@@ -253,6 +271,7 @@ async fn client_write_loop(
                         if resp.is_subscribed() || resp.is_chatroom_created() {
                             // Update chat_receiver so client can receive new messages from chatroom
                             chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
+                            // Forward response so it can be written to clients stream
                             resp
                         } else {
                             return Err(ServerError::IllegalResponse(format!("client {} received a {:?} response on 'chatroom_broker_receiver'", client_id, resp)));
@@ -327,9 +346,7 @@ struct Client {
     chatroom_broker_id: Option<Uuid>,
 }
 
-
-
-
+/// Helper function for creating a vector of bytes that represents the current state of the chatroom lobby.
 fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
     let mut lobby_state = vec![];
     for (_, chatroom) in chatroom_brokers {
@@ -338,6 +355,12 @@ fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
     lobby_state
 }
 
+/// The main broker task that acts as the brain of the chatroom server.
+///
+/// This function orchestrates new handling events from clients and chatroom sub-broker tasks and
+/// manages the state necessary for making this work.
+/// # Parameters
+/// 'event_receiver' for incoming events sent directly from clients
 async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     // For keeping track of current clients
     let mut clients: HashMap<Uuid, Client> = HashMap::new();
@@ -355,24 +378,28 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     let mut chatroom_brokers: HashMap<Uuid, Chatroom> = HashMap::new();
     let mut chatroom_name_to_id : HashMap<Arc<String>, Uuid> = HashMap::new();
 
-    // Channel for communicating with chatroom-sub-broker tasks, used exclusively for an exiting client
+    // Channel for communicating with chatroom-sub-broker tasks, used exclusively for a client exiting from a chatroom
+    // that way the main broker task knows to send an ExitChatroom response to the client that has exited
     let (client_exit_sub_broker_sender, client_exit_sub_broker_receiver) = channel::unbounded::<Event>();
 
     // Channel for harvesting disconnected chatroom-sub-broker tasks
     let (disconnected_sub_broker_sender, disconnected_sub_broker_receiver) = channel::unbounded::<(Uuid, AsyncStdReceiver<Event>, AsyncStdSender<Event>, TokioBroadcastSender<Response>)>();
 
     // Fuse receivers
+    // For receiving events directly from client read tasks
     let mut client_event_receiver = event_receiver.fuse();
+    // For harvesting disconnecting/quiting clients
     let mut client_disconnection_receiver = client_disconnection_receiver.fuse();
+    // For receiving clients exiting from chatrooms
     let mut client_exit_sub_broker_receiver = client_exit_sub_broker_receiver.fuse();
+    // For harvesting disconnecting chatroom sub-broker tasks
     let mut disconnected_sub_broker_receiver = disconnected_sub_broker_receiver.fuse();
 
     loop {
 
         // We can receive events from disconnecting clients, connected client reader tasks, sub-broker tasks
-        // or disconnecting sub-broker tasks
+        // or disconnecting sub-broker tasks, select over all possible receiving options.
         let event = select! {
-
             // Listen for disconnecting clients
             disconnection = client_disconnection_receiver.next().fuse() => {
                 // Harvest the data sent by the client's disconnecting procedure and remove the client
@@ -380,7 +407,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                         .ok_or(ServerError::ChannelReceiveError(String::from("'client_disconnection_receiver' should send harvestable data")))?;
 
                 // Thus we guarantee that the client in the hashmap does not outlive any of the channels
-                // hat were spawned inside the main broker task
+                // that were spawned inside the main broker task
                 let mut removed_client = clients.remove(&peer_id).ok_or(ServerError::StateError(format!("client with peer id {} should exist in client map", peer_id)))?;
 
                 // Check if client had set their username
@@ -396,6 +423,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 if let Some(chatroom_id) = removed_client.chatroom_broker_id.take() {
 
                     // Take chatroom broker for the purpose of updating and potentially removing
+                    // if the chatroom is now empty
                     let mut chatroom_broker = chatroom_brokers
                         .remove(&chatroom_id)
                         .ok_or(ServerError::StateError(format!("chatroom sub-broker with id {} should exist in map", chatroom_id)))?;
@@ -407,15 +435,17 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                     // do not place broker back into map
                     if chatroom_broker.num_clients == 0 {
                         // Attempt to remove name from  name map
-                        if chatroom_name_to_id.remove(&chatroom_broker.name).is_none() {
-                            return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
-                        }
+                        // if chatroom_name_to_id.remove(&chatroom_broker.name).is_none() {
+                        //     return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
+                        // }
+                        chatroom_name_to_id.remove(&chatroom_broker.name)
+                            .ok_or(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in map", chatroom_broker.name)))?;
                         // Attempt to send shutdown signal
                         match chatroom_broker.shutdown.take() {
                             Some(shutdown) => {
                                 drop(shutdown);
                             }
-                            _ => return Err(ServerError::StateError(format!("chatroom sub-broker with id {} should have shutdown set to some", chatroom_id))),
+                            _ => return Err(ServerError::StateError(format!("chatroom sub-broker with id {} should have shutdown set to Some", chatroom_id))),
                         }
                     } else {
                         // Otherwise put the broker back into broker's map with updated client count
@@ -444,7 +474,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 match event {
                     Some(event) => event,
                     // This case triggers graceful shutdown for the broker task, ie
-                    // the accept loop has started shutdown, no client has a sending half of this channel
+                    // the accept loop has started shutdown, and no client has a sending half of this channel
                     None => break,
                 }
             }
@@ -456,7 +486,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                     |ev| -> Result<Uuid, ServerError> {
                         match ev {
                             Event::Quit {peer_id} => Ok(peer_id),
-                            _ => Err(ServerError::ChannelReceiveError(String::from("received invalid 'Event' from 'client_exit_sub_broker_receiver'")))
+                            _ => Err(ServerError::IllegalEvent(String::from("received illegal 'Event' from 'client_exit_sub_broker_receiver'")))
                         }
                     }
                 )?;
@@ -485,9 +515,11 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
 
                 // Check if we need to initiate a shutdown for the current sub-broker
                 if chatroom_broker.num_clients == 0 {
-                    if chatroom_name_to_id.remove(&chatroom_broker.name).is_none() {
-                        return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
-                    }
+                    // if chatroom_name_to_id.remove(&chatroom_broker.name).is_none() {
+                    //     return Err(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in set", chatroom_broker.name)));
+                    // }
+                    chatroom_name_to_id.remove(&chatroom_broker.name)
+                            .ok_or(ServerError::StateError(format!("chatroom sub-broker with name {} should exist in map", chatroom_broker.name)))?;
                     match chatroom_broker.shutdown.take() {
                         Some(shutdown) => drop(shutdown),
                         _ => return Err(ServerError::StateError(format!("chatroom sub-broker with id {} should have shutdown set to 'Some'", chatroom_broker_id))),
@@ -505,6 +537,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
         // Now attempt to parse event and send a response
         match event {
             Event::Quit {peer_id} => {
+                // TODO: log/trace
                 println!("Logging that client {:?} has quit", peer_id);
             }
             Event::Lobby {peer_id} => {
@@ -552,7 +585,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 let chatroom_name = Arc::new(chatroom_name);
 
                 if chatroom_name_to_id.contains_key(&chatroom_name) {
-                    let lobby_state = create_lobby_state(&mut chatroom_brokers);
+                    let lobby_state = create_lobby_state(&chatroom_brokers);
                     client.main_broker_write_task_sender.send(
                         Response::ChatroomAlreadyExists {
                             chatroom_name: chatroom_name_clone,
@@ -564,11 +597,13 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                     // Otherwise we can create the chatroom
                     let id = Uuid::new_v4();
 
-                    // Channel for client subscriptions i.e from chatroom broker to client write tasks
+                    // Channel for client subscriptions i.e from chatroom sub-broker to client write tasks
                     // TODO: Set capacity has a parameter
                     let (mut broadcast_sender, broadcast_receiver) = broadcast::channel::<Response>(100);
 
-                    // Channel for client sending i.e from client read tasks to chatroom broker
+                    // Channel for client sending i.e from client read tasks to chatroom sub-broker
+                    // Needs to be saved for whenever a new client wishes to join this chatroom,
+                    // the sender can be cloned and used by the client
                     // TODO: add capacity to avoid overflow of messages received
                     let (client_sender, mut client_receiver) = channel::unbounded::<Event>();
 
@@ -801,6 +836,15 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
     Ok(())
 }
 
+/// Task that manages sending/broadcasting of messages for a single chatroom.
+///
+/// # Parameters
+/// 'id' The id of the chatroom
+/// 'events' A stream of events received directly from clients
+/// 'client_exit' The sending half of a channel used to send notifications to the main broker
+/// that a client has exited its chatroom
+/// 'broadcast_sender' A broadcast channel so that any client write task that has subscribed can receive messages
+/// 'shutdown_receiver' A channel for receiving shutdown signals from the main broker
 async fn chatroom_broker(
     id: Uuid,
     events: &mut AsyncStdReceiver<Event>,
