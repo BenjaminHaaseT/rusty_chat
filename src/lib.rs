@@ -149,12 +149,16 @@ impl TryFrom<Vec<u8>> for ChatroomFrames {
         let len = bytes.len() as u64;
         let mut cursor = std::io::Cursor::new(bytes);
         let mut frames = vec![];
-        loop {
+        // loop {
+        //     let frame = ChatroomFrame::try_parse(&mut cursor)?;
+        //     frames.push(frame);
+        //     if cursor.position() == len {
+        //         break;
+        //     }
+        // }
+        while cursor.position() < len {
             let frame = ChatroomFrame::try_parse(&mut cursor)?;
             frames.push(frame);
-            if cursor.position() == len {
-                break;
-            }
         }
         Ok(ChatroomFrames { frames })
     }
@@ -1781,5 +1785,13 @@ mod test {
         assert_eq!(chatroom_frames.frames[2].name.as_str(), chatroom3.name.as_str());
         assert_eq!(chatroom_frames.frames[2].capacity, chatroom3.capacity);
         assert_eq!(chatroom_frames.frames[2].num_clients, chatroom3.num_clients);
+
+        // Now try with an empty vector of bytes
+        let lobby_state = vec![];
+        let chatroom_frames_res = ChatroomFrames::try_from(lobby_state);
+
+        println!("{:?}", chatroom_frames_res);
+
+        assert!(chatroom_frames_res.is_ok());
     }
 }

@@ -59,6 +59,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
 /// for writing responses back to the client from the server. 'main_broker_sender' is used for sending
 /// events triggered by the client to the main broker task.
 async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: TcpStream) -> Result<(), ServerError> {
+    println!("Inside handle connection");
     // Move into an arc, so it can be shared between read/write tasks
     let client_stream = Arc::new(client_stream);
     // strictly for reading from the client

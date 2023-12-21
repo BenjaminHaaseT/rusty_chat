@@ -20,7 +20,7 @@ pub struct Interface;
 
 impl Interface {
     /// Starts a new client connection to the chatroom server and runs the UI for the connecting client.
-    pub async fn new<A: ToSocketAddrs + Debug + Clone>(addrs: A) -> Result<(), UserError> {
+    pub async fn run<A: ToSocketAddrs + Debug + Clone>(addrs: A) -> Result<(), UserError> {
         // Establish connection to server
         println!("Connecting to {:?}...", addrs);
         let mut stream = TcpStream::connect(addrs).await.map_err(|e| UserError::ConnectionError(e))?;
