@@ -141,8 +141,10 @@ where
     loop {
         // Select from receiving input sources
         let msg = select! {
-            client_msg = keyboard_recv.select_next_some().fuse() => {
-                let abridged_msg = format!("{}: {}", username, client_msg);
+            client_msg = keyboard_recv.next().fuse() => {
+                println!("{:?}", client_msg);
+                let Some(msg) = client_msg else {panic!("received 'None' from keyboard input task")};
+                let abridged_msg = format!("{}: {}", username, msg);
                 // Send message to server
                 to_server.write_all(&Frame::Message{message: abridged_msg.clone()}.as_bytes())
                     .await
