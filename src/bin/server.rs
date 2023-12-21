@@ -896,7 +896,16 @@ async fn chatroom_broker(
 
 
 
-fn main() {todo!()}
+fn main() {
+    let address = "0.0.0.0";
+    let port = 8080;
+    let res = task::block_on(accept_loop((address, port), 10_000));
+    if let Err(e) = res {
+        eprintln!("error from main: {e}");
+    } else {
+        println!("exited successfully from server");
+    }
+}
 
 #[cfg(test)]
 mod test {
