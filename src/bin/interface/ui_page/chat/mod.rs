@@ -72,55 +72,8 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
             _ => {}
         }
     }
-    // loop {
-    //     match keyboard.select_next_some().await {
-    //         Ok(Key::Char('\n')) => {
-    //             // Get a lock on stdout, needs to be in a separate scope since stdout blocks,
-    //             // i.e. cannot be held across an .await call.
-    //             {
-    //                 // Reset the users prompt
-    //                 let mut guard = stdout.lock();
-    //                 write!(guard, "{}{}", cursor::Goto(4, 18), clear::AfterCursor)
-    //                     .map_err(|e| UserError::WriteError(e))?;
-    //                 guard.flush().map_err(|e| UserError::WriteError(e))?;
-    //                 Ok::<(), UserError>(())
-    //             }?;
-    //             // Send buf that contains new message to chat-window
-    //             to_window.send(buf)
-    //                 .await
-    //                 .map_err(|_| UserError::SendError("keyboard input task unable to send message to chat-window task"))?;
-    //             buf = String::new();
-    //         }
-    //         Ok(Key::Char(c)) => {
-    //             // Write the new character to the prompt, lock stdout again so we get exclusive access
-    //             let mut guard = stdout.lock();
-    //             write!(guard, "{}{:?}{}", cursor::Goto(4 + buf.len() as u16, 18), color::Rgb(215, 247, 241), c)
-    //                 .map_err(|e| UserError::WriteError(e))?;
-    //             guard.flush()
-    //                 .map_err(|e| UserError::WriteError(e))?;
-    //             // push the new character into the buffer
-    //             buf.push(c);
-    //         }
-    //         Ok(Key::Ctrl('q')) => {
-    //             let mut guard = stdout.lock();
-    //             write!(guard, "{}{}{:?}{}", cursor::Goto(1, 18), clear::CurrentLine, color::Cyan, "GOODBYE")
-    //                 .map_err(|e| UserError::WriteError(e))?;
-    //             guard.flush()
-    //                 .map_err(|e| UserError::WriteError(e))?;
-    //             break;
-    //         }
-    //         Ok(Key::Backspace) if buf.len() > 0 => {
-    //             // First remove the character from the prompt
-    //             let mut guard = stdout.lock();
-    //             write!(guard, "{}{}", cursor::Goto(4 + buf.len() as u16 - 1, 18), clear::AfterCursor)
-    //                 .map_err(|e| UserError::WriteError(e))?;
-    //             guard.flush().map_err(|e| UserError::WriteError(e))?;
-    //             buf.pop();
-    //         }
-    //         _ => {}
-    //     }
-    // }
-    println!("Keyboard sender channel dropped");
+    // Todo: Logging maybe?
+    // println!("Keyboard sender channel dropped");
     Ok(())
 }
 
@@ -196,7 +149,7 @@ where
                     Some(msg) => msg,
                     None if keyboard_recv.is_done() => {
                         // Todo: log instead
-                        println!("shutting down chat-window task from 'keyboard_recv'");
+                        // println!("shutting down chat-window task from 'keyboard_recv'");
                         to_server.write_all(&Frame::Quit.as_bytes())
                         .await
                         .map_err(|e| UserError::WriteError(e))?;
