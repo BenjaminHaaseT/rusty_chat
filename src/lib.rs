@@ -348,6 +348,13 @@ impl Response {
         }
     }
 
+    pub fn is_exit_lobby(&self) -> bool {
+        match self {
+            Response::ExitLobby => true,
+            _ => false
+        }
+    }
+
     pub fn is_exit_chatroom(&self) -> bool {
         match self {
             Response::ExitChatroom {chatroom_name} => true,

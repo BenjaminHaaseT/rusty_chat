@@ -227,7 +227,14 @@ async fn client_write_loop(
                 println!("Client {} write loop shutting down", client_id);
                 match null {
                     Some(null) => match null {},
-                    _ => break,
+                    _ => {
+                        // Write an exit lobby response back to client so the client can finish
+                        // if the client task is waiting for a response
+                        client_stream.write_all(&Response::ExitLobby.as_bytes())
+                            .await
+                            .map_err(|_| ServerError::ChannelSendError(format!("client write task {} unable to send 'ExitLobby' response during task shutdown", client_id)))?;
+                        break;
+                    }
                 }
             },
 
@@ -407,6 +414,8 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 let (peer_id, _client_response_channel, _client_chat_channel) = disconnection
                         .ok_or(ServerError::ChannelReceiveError(String::from("'client_disconnection_receiver' should send harvestable data")))?;
 
+                println!("harvested from disconnected client: {}", peer_id);
+
                 // Thus we guarantee that the client in the hashmap does not outlive any of the channels
                 // that were spawned inside the main broker task
                 let mut removed_client = clients.remove(&peer_id).ok_or(ServerError::StateError(format!("client with peer id {} should exist in client map", peer_id)))?;
@@ -538,7 +547,13 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
         // Now attempt to parse event and send a response
         match event {
             Event::Quit {peer_id} => {
-                // TODO: log/trace
+                // let mut client = clients.get_mut(&peer_id)
+                //     .ok_or(ServerError::StateError(format!("client with id {} should exist in map", peer_id)))?;
+                // // Send quit response back to client
+                // client.main_broker_write_task_sender
+                //     .send(Response::ExitLobby)
+                //     .await
+                //     .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task 'ExitLobby' response", peer_id)))?;
                 println!("Logging that client {:?} has quit", peer_id);
             }
             Event::Lobby {peer_id} => {

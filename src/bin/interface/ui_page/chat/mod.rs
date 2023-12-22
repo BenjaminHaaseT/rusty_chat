@@ -46,7 +46,7 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
             Ok(Key::Char(c)) => {
                 // Write the new character to the prompt, lock stdout again so we get exclusive access
                 let mut guard = stdout.lock();
-                write!(guard, "{}{}{}", cursor::Goto(4 + buf.len() as u16, 17), color::Fg(color::Rgb(215, 247, 241)), c)
+                write!(guard, "{}{}{}{}", cursor::Goto(4 + buf.len() as u16, 17), color::Fg(color::Rgb(215, 247, 241)), c, color::Fg(color::Reset))
                     .map_err(|e| UserError::WriteError(e))?;
                 guard.flush()
                     .map_err(|e| UserError::WriteError(e))?;
@@ -55,7 +55,7 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
             }
             Ok(Key::Ctrl('q')) => {
                 let mut guard = stdout.lock();
-                write!(guard, "{}{}{}{}", cursor::Goto(1, 17), clear::CurrentLine, color::Fg(color::Cyan), "GOODBYE")
+                write!(guard, "{}{}{}{}{}", cursor::Goto(1, 17), clear::CurrentLine, color::Fg(color::Cyan), "GOODBYE", color::Fg(color::Reset))
                     .map_err(|e| UserError::WriteError(e))?;
                 guard.flush()
                     .map_err(|e| UserError::WriteError(e))?;
@@ -150,7 +150,7 @@ where
         .map_err(|e| UserError::WriteError(e))?;
 
     // Write white space
-    write!(stdout, "{}{}", cursor::Goto(1, 2), "\n".repeat(15))
+    write!(stdout, "{}{}", cursor::Goto(1, 2), "\n".repeat(16))
         .map_err(|e| UserError::WriteError(e))?;
     stdout.flush()
         .map_err(|e| UserError::WriteError(e))?;
@@ -162,7 +162,7 @@ where
         .map_err(|e| UserError::WriteError(e))?;
 
     // Write prompt
-    write!(stdout, "{}{}{}", cursor::Goto(1, 17), color::Fg(color::Rgb(250, 250, 237)), ">>>")
+    write!(stdout, "{}{}{}{}", cursor::Goto(1, 17), color::Fg(color::Rgb(250, 250, 237)), ">>>", color::Fg(color::Reset))
         .map_err(|e| UserError::WriteError(e))?;
     stdout.flush()
         .map_err(|e| UserError::WriteError(e))?;
@@ -244,7 +244,7 @@ where
         // For keeping track of the current row
         let mut row = 15;
         for msg in msg_queue.iter().rev() {
-            write!(guard, "{}{}{}{}", cursor::Goto(1, row), clear::CurrentLine, color::Fg(color::Rgb(215, 247, 241)), msg)
+            write!(guard, "{}{}{}{}{}", cursor::Goto(1, row), clear::CurrentLine, color::Fg(color::Rgb(215, 247, 241)), msg, color::Fg(color::Reset))
                 .map_err(|e| UserError::WriteError(e))?;
             guard.flush()
                 .map_err(|e| UserError::WriteError(e))?;
