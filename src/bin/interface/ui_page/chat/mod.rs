@@ -192,8 +192,18 @@ where
         // Select from receiving input sources
         let msg = select! {
             client_msg = keyboard_recv.next().fuse() => {
-                // println!("{:?}", client_msg);
-                let Some(msg) = client_msg else {panic!("received 'None' from keyboard input task")};
+                let msg = match client_msg {
+                    Some(msg) => msg,
+                    None if keyboard_recv.is_done() => {
+                        // Todo: log instead
+                        println!("shutting down chat-window task from 'keyboard_recv'");
+                        to_server.write_all(&Frame::Quit.as_bytes())
+                        .await
+                        .map_err(|e| UserError::WriteError(e))?;
+                        break;
+                    }
+                    _ => return Err(UserError::ReceiveError("received 'None' from unfinished stream 'keyboard_recv'")),
+                };
                 let abridged_msg = format!("{}: {}", username, msg);
                 // Send message to server
                 to_server.write_all(&Frame::Message{message: abridged_msg.clone()}.as_bytes())
@@ -212,7 +222,7 @@ where
                     Some(null) => match null {},
                     None => {
                         //TODO: log shutdown signal
-                        println!("shutting down chat-window task");
+                        println!("shutting down chat-window task from signal channel");
                         // Send quit frame to server
                         to_server.write_all(&Frame::Quit.as_bytes())
                             .await

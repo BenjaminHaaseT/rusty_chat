@@ -16,6 +16,7 @@ enum UserError {
     WriteError(std::io::Error),
     SendError(&'static str),
     ConnectionError(std::io::Error),
+    ReceiveError(&'static str),
 }
 
 impl Display for UserError {
@@ -30,6 +31,7 @@ impl Display for UserError {
             UserError::RawOutput(e) => write!(f, "raw output error: {e}"),
             UserError::SendError(s) => write!(f, "send error: {s}"),
             UserError::ConnectionError(e) => write!(f, "connection error: {e}"),
+            UserError::ReceiveError(s) => write!(f, "receive error: {s}"),
         }
     }
 }
