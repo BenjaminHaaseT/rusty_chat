@@ -175,7 +175,7 @@ where
                     Some(null) => match null {},
                     None => {
                         //TODO: log shutdown signal
-                        println!("shutting down chat-window task from signal channel");
+                        // println!("shutting down chat-window task from signal channel");
                         // Send quit frame to server
                         to_server.write_all(&Frame::Quit.as_bytes())
                             .await
