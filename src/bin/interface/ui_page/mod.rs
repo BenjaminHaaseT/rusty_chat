@@ -3,7 +3,7 @@
 use std::fmt::Display;
 use std::{print, println, panic, todo};
 use std::marker::Unpin;
-use std::io::{Stdout, stdout};
+use std::io::{Stdout, stdout, Write as StdWrite};
 use async_std::{
     io::{Read, ReadExt, Write, WriteExt, BufRead}
 };
@@ -128,10 +128,23 @@ impl UIPage {
                 }
             },
             UIPage::LobbyPage {username, lobby_state} => {
-                println!("{}", "-".repeat(80));
+                // println!("{}", "-".repeat(80));
                 match response {
                     Response::ExitLobby => {
-                        println!("Goodbye {}", username);
+                        // println!("Goodbye {}", username);
+                        // Goodbye message
+                        write!(
+                            stdout, "{}{}{}{}{}",
+                            cursor::Goto(1, 1), clear::All,
+                            color::Fg(color::Cyan), format!("Goodbye {}", username),
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        // Reset cursor
+                        write!(stdout, "{}", cursor::Show).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
                         // Signals to interface that main loop should exit
                         Ok(UIPage::QuitLobbyPage)
                     }
@@ -147,7 +160,15 @@ impl UIPage {
                             return Err(UserError::InternalServerError("an internal server error occurred"));
                         }
                         // Display message to client they have successfully connected to the chatroom
-                        println!("You have successfully connected to {}", chatroom_name);
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, 1), clear::All,
+                            color::Fg(color::Cyan), format!("You have successfully subscribed to {}", chatroom_name),
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        // println!("You have successfully connected to {}", chatroom_name);
                         // Chatroom page signals that chatroom procedure needs to be started
                         Ok(UIPage::Chatroom { username, chatroom_name})
                     }
@@ -157,13 +178,21 @@ impl UIPage {
                         let confirmation_response = Response::try_parse(&mut from_server)
                             .await
                             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+
                         // We need to ensure that we receive Response::ReadSync variant, this should be the only
                         // response that the client receives during this state
                         if !confirmation_response.is_read_sync() {
                             return Err(UserError::InternalServerError("an internal server error occurred"));
                         }
                         // Display message to client they have successfully connected to the chatroom
-                        println!("You have successfully created the chatroom {}", chatroom_name);
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, 1), clear::All,
+                            color::Fg(color::Cyan), format!("You have successfully created chatroom {}", chatroom_name),
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        // println!("You have successfully created the chatroom {}", chatroom_name);
                         // Chatroom page signals that chatroom procedure needs to be started
                         Ok(UIPage::Chatroom { username, chatroom_name})
                     }
@@ -176,13 +205,27 @@ impl UIPage {
                          match confirmation_response {
                             Response::ChatroomCreated {chatroom_name} => {
                                 // Display message to client they have successfully connected to the chatroom
-                                println!("You have successfully created the chatroom {}", chatroom_name);
+                                write!(
+                                    stdout, "{}{}{}{}{}\n",
+                                    cursor::Goto(1, 1), clear::All,
+                                    color::Fg(color::Cyan), format!("You have successfully created chatroom {}", chatroom_name),
+                                    color::Fg(color::Reset)
+                                ).map_err(|e| UserError::WriteError(e))?;
+                                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                                // println!("You have successfully created the chatroom {}", chatroom_name);
                                 // Chatroom page signals that chatroom procedure needs to be started
                                 Ok(UIPage::Chatroom { username, chatroom_name})
                             },
                             Response::Subscribed {chatroom_name} => {
                                 // Display message to client they have successfully connected to the chatroom
-                                println!("You have successfully connected to {}", chatroom_name);
+                                write!(
+                                    stdout, "{}{}{}{}{}\n",
+                                    cursor::Goto(1, 1), clear::All,
+                                    color::Fg(color::Cyan), format!("You have successfully subscribed to {}", chatroom_name),
+                                    color::Fg(color::Reset)
+                                ).map_err(|e| UserError::WriteError(e))?;
+                                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                                // println!("You have successfully connected to {}", chatroom_name);
                                 // Chatroom page signals that chatroom procedure needs to be started
                                 Ok(UIPage::Chatroom { username, chatroom_name})
                             },
@@ -190,7 +233,16 @@ impl UIPage {
                         }
                     }
                     Response::ChatroomDoesNotExist {chatroom_name, lobby_state} => {
-                        println!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name);
+                        // Display feedback to client
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, 1), clear::All,
+                            color::Fg(color::Cyan), format!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name),
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        // println!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name);
                         // Parse the lobby state
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                             .map_err(|e| UserError::ParseLobby(e))?;
@@ -198,7 +250,16 @@ impl UIPage {
                         Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames})
                     }
                     Response::ChatroomAlreadyExists {chatroom_name, lobby_state} => {
-                        println!("Unable to create chatroom {}, chatroom: {} already exists. Please select another option.", chatroom_name, chatroom_name);
+                        // Display feedback to client
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, 1), clear::All,
+                            color::Fg(color::Cyan), format!("Unable to create chatroom {}, chatroom: {} already exists. Please select another option.", chatroom_name, chatroom_name),
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        // println!("Unable to create chatroom {}, chatroom: {} already exists. Please select another option.", chatroom_name, chatroom_name);
+
                         // Parse the lobby state
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                             .map_err(|e| UserError::ParseLobby(e))?;
@@ -212,17 +273,38 @@ impl UIPage {
             UIPage::Chatroom {username, chatroom_name} => {
                 // We just need to ensure the client receives a ExitChatroom response
                 // and return a QuitChatroom variant,
-                print!("...");
+                write!(
+                    stdout, "{}{}{}{}",
+                    cursor::Goto(1, 1), clear::All,
+                    color::Fg(color::Cyan), "...",
+                ).map_err(|e| UserError::WriteError(e))?;
+                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
                 match response {
                     Response::ExitChatroom {chatroom_name} => {
-                        println!("Left chatroom {}", chatroom_name);
+                        write!(
+                            stdout, "{}{}",
+                            format!("Left chatroom {}", chatroom_name),
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        // println!("Left chatroom {}", chatroom_name);
                         Ok(UIPage::QuitChatroom {username, chatroom_name})
                     }
                     _ => Err(UserError::InternalServerError("an internal server error occurred")),
                 }
             }
             UIPage::QuitChatroom {username, chatroom_name} => {
-                println!("Entering lobby...");
+                write!(
+                    stdout, "{}{}{}{}{}\n",
+                    cursor::Goto(1, 1), clear::All,
+                    color::Fg(color::Cyan), "Entering lobby...",
+                    color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                // println!("Entering lobby...");
                 match response {
                     Response::Lobby {lobby_state} => {
                         // Parse the lobby state
@@ -291,7 +373,7 @@ impl UIPage {
                             stdout, "{}{}{}{}{}",
                             cursor::Goto(1, 2), clear::CurrentLine,
                             color::Fg(color::Rgb(215, 247, 241)),
-                            "username cannot be empty",
+                            "Username cannot be empty.",
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         stdout.flush().map_err(|e| UserError::WriteError(e))?;
@@ -301,7 +383,7 @@ impl UIPage {
                             stdout, "{}{}{}{}{}",
                             cursor::Goto(1, 2), clear::CurrentLine,
                             color::Fg(color::Rgb(215, 247, 241)),
-                            "username length cannot exceed 255 bytes ",
+                            "Username length cannot exceed 255 bytes.",
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         stdout.flush().map_err(|e| UserError::WriteError(e))?;
@@ -334,46 +416,49 @@ impl UIPage {
                 ).map_err(|e| UserError::WriteError(e))?;
                 stdout.flush().map_err(|e| UserError::WriteError(e))?;
 
-                // Get users input
-                let users_request = loop {
-                    if !lobby_state.is_empty() {
-                        // Get max length for formatting
-                        let max_chatroom_name_length = usize::max(
-                            lobby_state.frames.iter().map(|f| f.name.len()).max().unwrap(),
-                                8
-                        );
-
-                        write!(
-                            stdout, "{}{}{}{}{}\n",
-                            cursor::Goto(1, 2), clear::CurrentLine,
-                            color::Fg(color::Rgb(116, 179, 252)),
-                            format!("{:<w$} ~ {:<9}", "Chatroom", "Capacity", w=max_chatroom_name_length),
-                            color::Fg(color::Reset)
-                        ).map_err(|e| UserError::WriteError(e))?;
-                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
-
-                        for (i, frame) in lobby_state.frames.iter().enumerate() {
-                            write!(
-                                stdout, "{}{}{}{}{}\n",
-                                cursor::Goto(1, (i + 3) as u16), clear::CurrentLine,
-                                color::Fg(color::Rgb(116, 179, 252)),
-                                format!("{:<w$} ~ {:>4}/{:<4}", frame.name, frame.num_clients, frame.capacity, w=max_chatroom_name_length),
-                                color::Fg(color::Reset),
-                            ).map_err(|e| UserError::WriteError(e))?;
-                            stdout.flush().map_err(|e| UserError::WriteError(e))?;
-                        }
-                    }
-
-                    let prompt_offset = (lobby_state.frames.len() + 4) as u16;
+                if !lobby_state.frames.is_empty() {
+                    // Get max length for formatting
+                    let max_chatroom_name_length = usize::max(
+                        lobby_state.frames.iter().map(|f| f.name.len()).max().unwrap(),
+                        8
+                    );
 
                     write!(
-                        stdout, "\n{}{}{}{}{}\n",
-                        cursor::Goto(1, prompt_offset), clear::CurrentLine,
+                        stdout, "{}{}{}{}{}\n",
+                        cursor::Goto(1, 2), clear::CurrentLine,
                         color::Fg(color::Rgb(116, 179, 252)),
-                        "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
+                        format!("{:<w$} ~ {:<9}", "Chatroom", "Capacity", w=max_chatroom_name_length),
                         color::Fg(color::Reset)
                     ).map_err(|e| UserError::WriteError(e))?;
                     stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                    for (i, frame) in lobby_state.frames.iter().enumerate() {
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, (i + 3) as u16), clear::CurrentLine,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            format!("{:<w$} ~ {:>4}/{:<4}", frame.name, frame.num_clients, frame.capacity, w=max_chatroom_name_length),
+                            color::Fg(color::Reset),
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                    }
+                }
+
+                let prompt_offset = (lobby_state.frames.len() + 4) as u16;
+
+                write!(
+                    stdout, "{}{}{}{}{}\n",
+                    cursor::Goto(1, prompt_offset), clear::CurrentLine,
+                    color::Fg(color::Rgb(116, 179, 252)),
+                    "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
+                    color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                // Get users input, validate it inside a loop
+                let users_request = loop {
+
+
                     // write!(
                     //     stdout, "{}{}{}{}{}",
                     //     cursor::Goto(1, prompt_offset + 1), clear::CurrentLine,
@@ -385,6 +470,7 @@ impl UIPage {
                     // println!();
                     // println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                     // TODO: handle reading input from user
+
                     let mut buf = String::new();
                     from_client.read_line(&mut buf)
                         .await
@@ -392,28 +478,97 @@ impl UIPage {
                     let buf = buf.trim().to_owned();
                     // Ensure buf is not empty
                     if buf.is_empty() {
-                        println!("please enter valid input, input cannot be empty");
-                        println!();
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, prompt_offset), clear::AfterCursor,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            "Selection cannot be empty, please enter valid input.",
+                            color::Fg(color::Reset),
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, prompt_offset + 1), clear::AfterCursor,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        // println!("please enter valid input, input cannot be empty");
+                        // println!();
                     } else if buf.as_bytes().len() > 255 {
                         // Validate user has entered a valid chatroom name if the buffers length is greater than 1
                         // chatroom names cannot have a length greater than 255
-                        println!("the chatroom name you entered is too long, length cannot exceed 255 bytes");
-                        println!("please enter valid input");
-                        println!();
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, prompt_offset), clear::AfterCursor,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            "The chatroom name you entered is too long, length cannot exceed 255 bytes.",
+                            color::Fg(color::Reset),
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, prompt_offset + 1), clear::AfterCursor,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        // println!("the chatroom name you entered is too long, length cannot exceed 255 bytes");
+                        // println!("please enter valid input");
+                        // println!();
                     } else if buf.len() > 1 && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
                         // Ensure the selected chatroom name exists in the current lobby state
-                        println!("chatroom {} does not exist", buf);
-                        println!("please enter valid input");
-                        println!();
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, prompt_offset), clear::AfterCursor,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            format!("Chatroom {} does not exist.", buf),
+                            color::Fg(color::Reset),
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, prompt_offset + 1), clear::AfterCursor,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        // println!("chatroom {} does not exist", buf);
+                        // println!("please enter valid input");
+                        // println!();
                     } else if buf.len() == 1 && buf != "q" && buf != "c" {
                         // Ensure a valid command was entered
-                        println!("please enter valid input");
-                        println!();
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, prompt_offset), clear::AfterCursor,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            "Please select a valid option.",
+                            color::Fg(color::Reset),
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        write!(
+                            stdout, "{}{}{}{}{}\n",
+                            cursor::Goto(1, prompt_offset + 1), clear::AfterCursor,
+                            color::Fg(color::Rgb(116, 179, 252)),
+                            "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        // println!("please enter valid input");
+                        // println!();
                     } else {
                         // Valid input, break
                         break buf;
                     }
                 };
+
                 // We can be sure that the user has entered valid input from here, so we can send the
                 // request to the server
                 match users_request.as_str() {
@@ -426,16 +581,42 @@ impl UIPage {
                     "c" => {
                         // Validation loop pattern for getting users selected chatroom name
                         let chatroom_name = loop {
-                            println!("enter chatroom name:");
+                            write!(
+                                stdout, "{}{}{}{}{}\n",
+                                cursor::Goto(1, 2), clear::AfterCursor,
+                                color::Fg(color::Rgb(116, 179, 252)),
+                                "chatroom name: ", color::Fg(color::Reset)
+                            ).map_err(|e| UserError::WriteError(e))?;
+                            stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
                             let mut buf = String::new();
                             from_client.read_line(&mut buf)
                                 .await
                                 .map_err(|e| UserError::ReadError(e))?;
+
                             let buf = buf.trim().to_owned();
                             if buf.is_empty() {
-                                println!("chatroom name cannot be empty, please enter valid input.");
+                                write!(
+                                    stdout, "{}{}{}{}{}\n",
+                                    cursor::Goto(1, 2), clear::AfterCursor,
+                                    color::Fg(color::Rgb(116, 179, 252)),
+                                    "chatroom name cannot be empty, please enter a valid chatroom name",
+                                    color::Fg(color::Reset)
+                                ).map_err(|e| UserError::WriteError(e))?;
+                                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                                // println!("chatroom name cannot be empty, please enter valid input.");
                             } else if buf.as_bytes().len() > 255 {
-                                println!("chatroom name length cannot exceed 255 bytes, please enter valid input.");
+                                write!(
+                                    stdout, "{}{}{}{}{}\n",
+                                    cursor::Goto(1, 2), clear::AfterCursor,
+                                    color::Fg(color::Rgb(116, 179, 252)),
+                                    "chatroom name length cannot exceed 255 bytes, please enter a valid chatroom name",
+                                    color::Fg(color::Reset)
+                                ).map_err(|e| UserError::WriteError(e))?;
+                                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                                // println!("chatroom name length cannot exceed 255 bytes, please enter valid input.");
                             } else {
                                 break buf;
                             }
@@ -462,14 +643,31 @@ impl UIPage {
                 // Start the chatroom procedure
                 chat_window_task(username, chatroom_name, &mut from_server, &mut to_server).await?;
                 // client has left
-                println!("Leaving chatroom {}...", chatroom_name);
+                write!(
+                    stdout, "{}{}{}{}{}\n",
+                    cursor::Goto(1, 1), clear::All,
+                    color::Fg(color::Cyan), format!("Leaving chatroom {}...", chatroom_name),
+                    color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                // println!("Leaving chatroom {}...", chatroom_name);
                 Ok(())
             }
 
             // If this matches, the client has successfully quit from a chatroom.
             UIPage::QuitChatroom {username, chatroom_name} => {
                 // Client just needs to send a request to server to refresh their lobby state
-                println!("Re-entering lobby from {}...", chatroom_name);
+                write!(
+                    stdout, "{}{}{}{}{}\n",
+                    cursor::Goto(1, 1), clear::All,
+                    color::Fg(color::Cyan),
+                    format!("Re-entering lobby from {}...", chatroom_name),
+                    color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                // println!("Re-entering lobby from {}...", chatroom_name);
                 to_server.write_all(&Frame::Lobby.as_bytes())
                     .await
                     .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
