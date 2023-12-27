@@ -3,12 +3,12 @@
 use std::fmt::Display;
 use std::{print, println, panic, todo};
 use std::marker::Unpin;
-use std::io::{Stdout, stdout, Write as StdWrite};
+use std::io::{Stdout, stdout, stdin, Read as StdRead, Write as StdWrite};
 use async_std::{
     io::{Read, ReadExt, Write, WriteExt, BufRead}
 };
 use async_std::io::prelude::BufReadExt;
-use termion::{clear, cursor, style, color, raw::IntoRawMode};
+use termion::{clear, cursor, style, color, raw::IntoRawMode, raw::RawTerminal, input::TermRead};
 
 use crate::UserError;
 use rusty_chat::prelude::*;
@@ -684,6 +684,12 @@ impl UIPage {
             _ => false
         }
     }
+}
+
+/// Helper function for reading client input from stdin while using 'IntoRawMode' trait with
+/// stdout.
+fn read_line_from_client(stdout: &mut RawTerminal<Stdout>) -> String {
+    let mut keys = stdin().keys();
 
 
 }
