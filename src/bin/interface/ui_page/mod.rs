@@ -1,12 +1,16 @@
 //! Contains the traits and data structures to represent the UI pages of a client facing `Interface`
 //!
 use std::fmt::Display;
+use std::thread;
+use std::time::Duration;
 use std::{print, println, panic, todo};
 use std::marker::Unpin;
 use std::io::{Stdout, stdout, stdin, Read as StdRead, Write as StdWrite};
 use async_std::{
-    io::{Read, ReadExt, Write, WriteExt, BufRead}
+    io::{Read, ReadExt, Write, WriteExt, BufRead},
+    task,
 };
+
 use async_std::io::prelude::BufReadExt;
 use termion::{clear, cursor, style, color, raw::IntoRawMode, raw::RawTerminal, input::TermRead, event::Key};
 
@@ -93,11 +97,16 @@ impl UIPage {
                         write!(
                             stdout, "{}{}{}{}{}",
                             cursor::Goto(1, 2), clear::CurrentLine,
-                            color::Fg(color::Rgb(215, 247, 241)),
+                            color::Fg(color::Rgb(202, 227, 113)),
                             format!("Sorry, but '{}' is already taken", username),
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        // Ensure thread sleeps so that client get read feedback before UI updates
+                        // task::spawn_blocking(|| {
+                        //     thread::sleep(Duration::from_millis(2500));
+                        // }).await;
 
                         // println!("Sorry, but '{}' is already taken", username);
                         Ok(UIPage::UsernamePage)
@@ -237,11 +246,14 @@ impl UIPage {
                         write!(
                             stdout, "{}{}{}{}{}\n",
                             cursor::Goto(1, 1), clear::All,
-                            color::Fg(color::Cyan), format!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name),
+                            color::Fg(color::Rgb(202, 227, 113)), format!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name),
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         stdout.flush().map_err(|e| UserError::WriteError(e))?;
-
+                        // Ensure thread sleeps so client can read feedback before UI updates
+                        task::spawn_blocking(|| {
+                            thread::sleep(Duration::from_millis(2000));
+                        }).await;
                         // println!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name);
                         // Parse the lobby state
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
@@ -254,12 +266,14 @@ impl UIPage {
                         write!(
                             stdout, "{}{}{}{}{}\n",
                             cursor::Goto(1, 1), clear::All,
-                            color::Fg(color::Cyan), format!("Unable to create chatroom {}, chatroom: {} already exists. Please select another option.", chatroom_name, chatroom_name),
+                            color::Fg(color::Rgb(202, 227, 113)), format!("Unable to create chatroom {}, chatroom: {} already exists. Please select another option.", chatroom_name, chatroom_name),
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         stdout.flush().map_err(|e| UserError::WriteError(e))?;
                         // println!("Unable to create chatroom {}, chatroom: {} already exists. Please select another option.", chatroom_name, chatroom_name);
-
+                        task::spawn_blocking(|| {
+                            thread::sleep(Duration::from_millis(2000));
+                        }).await;
                         // Parse the lobby state
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                             .map_err(|e| UserError::ParseLobby(e))?;
@@ -288,6 +302,10 @@ impl UIPage {
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                        task::spawn_blocking(|| {
+                            thread::sleep(Duration::from_millis(1000));
+                        }).await;
 
                         // println!("Left chatroom {}", chatroom_name);
                         Ok(UIPage::QuitChatroom {username, chatroom_name})
@@ -353,7 +371,7 @@ impl UIPage {
                 let username = loop {
                     write!(
                         stdout, "{}{}{}{}{}",
-                        cursor::Goto(1, 2), clear::CurrentLine,
+                        cursor::Goto(1, 3), clear::CurrentLine,
                         color::Fg(color::Rgb(215, 247, 241)),
                         "please enter your desired username: ",
                         color::Fg(color::Reset)
@@ -367,7 +385,7 @@ impl UIPage {
                     //     .map_err(|e| UserError::ReadError(e))?;
 
                     // Read line from client input
-                    let selected_username = read_line_from_client_input(&mut stdout, 2, 37)?;
+                    let selected_username = read_line_from_client_input(&mut stdout, 3, 37)?;
 
                     // Ensure we remove leading/trailing white space
                     let selected_username = selected_username.trim().to_owned();
@@ -375,7 +393,7 @@ impl UIPage {
                         write!(
                             stdout, "{}{}{}{}{}",
                             cursor::Goto(1, 2), clear::CurrentLine,
-                            color::Fg(color::Rgb(215, 247, 241)),
+                            color::Fg(color::Rgb(202, 227, 113)),
                             "Username cannot be empty.",
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
@@ -385,7 +403,7 @@ impl UIPage {
                         write!(
                             stdout, "{}{}{}{}{}",
                             cursor::Goto(1, 2), clear::CurrentLine,
-                            color::Fg(color::Rgb(215, 247, 241)),
+                            color::Fg(color::Rgb(202, 227, 113)),
                             "Username length cannot exceed 255 bytes.",
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
@@ -515,7 +533,7 @@ impl UIPage {
                         write!(
                             stdout, "{}{}{}{}{}\n",
                             cursor::Goto(1, prompt_offset), clear::AfterCursor,
-                            color::Fg(color::Rgb(116, 179, 252)),
+                            color::Fg(color::Rgb(202, 227, 113)),
                             "The chatroom name you entered is too long, length cannot exceed 255 bytes.",
                             color::Fg(color::Reset),
                         ).map_err(|e| UserError::WriteError(e))?;
@@ -539,7 +557,7 @@ impl UIPage {
                         write!(
                             stdout, "{}{}{}{}{}\n",
                             cursor::Goto(1, prompt_offset), clear::AfterCursor,
-                            color::Fg(color::Rgb(116, 179, 252)),
+                            color::Fg(color::Rgb(202, 227, 113)),
                             format!("Chatroom {} does not exist.", buf),
                             color::Fg(color::Reset),
                         ).map_err(|e| UserError::WriteError(e))?;
@@ -561,7 +579,7 @@ impl UIPage {
                         write!(
                             stdout, "{}{}{}{}{}\n",
                             cursor::Goto(1, prompt_offset), clear::AfterCursor,
-                            color::Fg(color::Rgb(116, 179, 252)),
+                            color::Fg(color::Rgb(202, 227, 113)),
                             "Please select a valid option.",
                             color::Fg(color::Reset),
                         ).map_err(|e| UserError::WriteError(e))?;
@@ -620,7 +638,7 @@ impl UIPage {
                                 write!(
                                     stdout, "{}{}{}{}{}\n",
                                     cursor::Goto(1, 1), clear::AfterCursor,
-                                    color::Fg(color::Rgb(116, 179, 252)),
+                                    color::Fg(color::Rgb(202, 227, 113)),
                                     "chatroom name cannot be empty, please enter a valid chatroom name",
                                     color::Fg(color::Reset)
                                 ).map_err(|e| UserError::WriteError(e))?;
@@ -631,7 +649,7 @@ impl UIPage {
                                 write!(
                                     stdout, "{}{}{}{}{}\n",
                                     cursor::Goto(1, 1), clear::AfterCursor,
-                                    color::Fg(color::Rgb(116, 179, 252)),
+                                    color::Fg(color::Rgb(202, 227, 113)),
                                     "chatroom name length cannot exceed 255 bytes, please enter a valid chatroom name",
                                     color::Fg(color::Reset)
                                 ).map_err(|e| UserError::WriteError(e))?;
@@ -671,6 +689,9 @@ impl UIPage {
                     color::Fg(color::Reset)
                 ).map_err(|e| UserError::WriteError(e))?;
                 stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                task::spawn_blocking(|| {
+                    thread::sleep(Duration::from_millis(1000))
+                }).await;
 
                 // println!("Leaving chatroom {}...", chatroom_name);
                 Ok(())
@@ -687,7 +708,9 @@ impl UIPage {
                     color::Fg(color::Reset)
                 ).map_err(|e| UserError::WriteError(e))?;
                 stdout.flush().map_err(|e| UserError::WriteError(e))?;
-
+                task::spawn_blocking(|| {
+                    thread::sleep(Duration::from_millis(1000))
+                }).await;
                 // println!("Re-entering lobby from {}...", chatroom_name);
                 to_server.write_all(&Frame::Lobby.as_bytes())
                     .await
