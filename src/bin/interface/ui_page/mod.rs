@@ -8,7 +8,7 @@ use async_std::{
     io::{Read, ReadExt, Write, WriteExt, BufRead}
 };
 use async_std::io::prelude::BufReadExt;
-use termion::{clear, cursor, style, color, raw::IntoRawMode, raw::RawTerminal, input::TermRead};
+use termion::{clear, cursor, style, color, raw::IntoRawMode, raw::RawTerminal, input::TermRead, event::Key};
 
 use crate::UserError;
 use rusty_chat::prelude::*;
@@ -75,8 +75,8 @@ impl UIPage {
                 }
                 // Display the state to the client
                 write!(
-                    stdout, "{}{}{}{}{}{:^-80}{}{}\n",
-                    cursor::Goto(1, 1), cursor::Hide, clear::All,
+                    stdout, "{}{}{}{}{:-^80}{}{}\n",
+                    cursor::Goto(1, 1), clear::AfterCursor,
                     color::Fg(color::Rgb(116, 179, 252)),
                     style::Bold, "Welcome To Rusty Chat!",
                     style::Reset, color::Fg(color::Reset)
@@ -104,14 +104,14 @@ impl UIPage {
                     }
                     Response::UsernameOk { username, lobby_state} => {
                         // Inform client chosen username is ok
-                        write!(
-                            stdout, "{}{}{}{}{}",
-                            cursor::Goto(1, 2), clear::CurrentLine,
-                            color::Fg(color::Rgb(215, 247, 241)),
-                            format!("Welcome {}", username),
-                            color::Fg(color::Reset)
-                        ).map_err(|e| UserError::WriteError(e))?;
-                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        // write!(
+                        //     stdout, "{}{}{}{}{}",
+                        //     cursor::Goto(1, 2), clear::CurrentLine,
+                        //     color::Fg(color::Rgb(215, 247, 241)),
+                        //     format!("Welcome {}", username),
+                        //     color::Fg(color::Reset)
+                        // ).map_err(|e| UserError::WriteError(e))?;
+                        // stdout.flush().map_err(|e| UserError::WriteError(e))?;
                         // println!("Welcome {}", username);
 
                         // Parse the lobby state
@@ -361,10 +361,13 @@ impl UIPage {
                     stdout.flush().map_err(|e| UserError::WriteError(e))?;
                     // println!("Please enter your username: ");
 
-                    let mut selected_username = String::new();
-                    from_client.read_line(&mut selected_username)
-                        .await
-                        .map_err(|e| UserError::ReadError(e))?;
+                    // let mut selected_username = String::new();
+                    // from_client.read_line(&mut selected_username)
+                    //     .await
+                    //     .map_err(|e| UserError::ReadError(e))?;
+
+                    // Read line from client input
+                    let selected_username = read_line_from_client_input(&mut stdout)?;
 
                     // Ensure we remove leading/trailing white space
                     let selected_username = selected_username.trim().to_owned();
@@ -407,12 +410,14 @@ impl UIPage {
             // prompt for users input.
             UIPage::LobbyPage {username, lobby_state} => {
                 // First update the page header for the lobby
+                let fmt_width = usize::max(80, username.as_bytes().len() + 31);
                 write!(
-                    stdout, "{}{}{}{}{}{:^-80}{}\n",
-                    cursor::Goto(1, 1), clear::All,
+                    stdout, "{}{}{}{}{:-^w$}{}{}\n",
+                    cursor::Goto(1, 1), clear::AfterCursor,
                     color::Fg(color::Rgb(116, 179, 252)),
-                    style::Bold, "Rusty Chat Lobby",
-                    style::Reset, color::Fg(color::Reset)
+                    style::Bold, format!("{} ~ Welcome to Rusty Chat lobby", username),
+                    style::Reset, color::Fg(color::Reset),
+                    w=fmt_width
                 ).map_err(|e| UserError::WriteError(e))?;
                 stdout.flush().map_err(|e| UserError::WriteError(e))?;
 
@@ -471,11 +476,15 @@ impl UIPage {
                     // println!("[q] quit | [c] create new chatroom | [:name:] join existing chatroom");
                     // TODO: handle reading input from user
 
-                    let mut buf = String::new();
-                    from_client.read_line(&mut buf)
-                        .await
-                        .map_err(|e| UserError::ReadError(e))?;
+                    // let mut buf = String::new();
+                    // from_client.read_line(&mut buf)
+                    //     .await
+                    //     .map_err(|e| UserError::ReadError(e))?;
+
+                    // Read buffer from client input
+                    let buf = read_line_from_client_input(&mut stdout)?;
                     let buf = buf.trim().to_owned();
+
                     // Ensure buf is not empty
                     if buf.is_empty() {
                         write!(
@@ -589,12 +598,15 @@ impl UIPage {
                             ).map_err(|e| UserError::WriteError(e))?;
                             stdout.flush().map_err(|e| UserError::WriteError(e))?;
 
-                            let mut buf = String::new();
-                            from_client.read_line(&mut buf)
-                                .await
-                                .map_err(|e| UserError::ReadError(e))?;
+                            // let mut buf = String::new();
+                            // from_client.read_line(&mut buf)
+                            //     .await
+                            //     .map_err(|e| UserError::ReadError(e))?;
 
+                            // Read buffer from client input
+                            let buf = read_line_from_client_input(&mut stdout)?;
                             let buf = buf.trim().to_owned();
+
                             if buf.is_empty() {
                                 write!(
                                     stdout, "{}{}{}{}{}\n",
@@ -688,8 +700,34 @@ impl UIPage {
 
 /// Helper function for reading client input from stdin while using 'IntoRawMode' trait with
 /// stdout.
-fn read_line_from_client(stdout: &mut RawTerminal<Stdout>) -> String {
+fn read_line_from_client_input(stdout: &mut RawTerminal<Stdout>) -> Result<String, UserError> {
     let mut keys = stdin().keys();
-
-
+    let mut buf = String::new();
+    loop {
+        let Some(key_res) = keys.next() else { return Err(UserError::ReadInput("unable to read key event from standard in")) };
+        match key_res {
+            Ok(Key::Char('\n')) => {
+                write!(stdout, "{}", clear::CurrentLine).map_err(|e| UserError::WriteError(e))?;
+                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                break;
+            }
+            Ok(Key::Char(c)) => {
+                write!(
+                    stdout, "{}{}{}",
+                    color::Fg(color::Rgb(215, 247, 241)),
+                    c, color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                buf.push(c);
+            }
+            Ok(Key::Backspace) if buf.len() > 0 => {
+                write!(stdout, "{}{}", cursor::Left(1), clear::AfterCursor).map_err(|e| UserError::WriteError(e))?;
+                stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                buf.pop();
+            }
+            Ok(_) => {}
+            Err(e) => return Err(UserError::ReadError(e))
+        }
+    }
+    Ok(buf)
 }
