@@ -53,6 +53,9 @@ impl Interface {
             // Attempt to read client input and send a request to the server
             ui.process_request(&mut from_client, to_server, from_server).await?;
         }
+
+        write!(stdout, "\n\r{}", cursor::Show).map_err(|e| UserError::WriteError(e))?;
+        stdout.flush().map_err(|e| UserError::WriteError(e))?;
         Ok(())
     }
 }

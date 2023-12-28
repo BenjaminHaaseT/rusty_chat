@@ -32,7 +32,7 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
                 {
                     // Reset the users prompt
                     let mut guard = stdout.lock();
-                    write!(guard, "{}{}", cursor::Goto(4, 17), clear::AfterCursor)
+                    write!(guard, "{}{}", cursor::Goto(4, 12), clear::AfterCursor)
                         .map_err(|e| UserError::WriteError(e))?;
                     guard.flush().map_err(|e| UserError::WriteError(e))?;
                     Ok::<(), UserError>(())
@@ -46,7 +46,7 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
             Ok(Key::Char(c)) => {
                 // Write the new character to the prompt, lock stdout again so we get exclusive access
                 let mut guard = stdout.lock();
-                write!(guard, "{}{}{}{}", cursor::Goto(4 + buf.len() as u16, 17), color::Fg(color::Rgb(215, 247, 241)), c, color::Fg(color::Reset))
+                write!(guard, "{}{}{}{}", cursor::Goto(4 + buf.len() as u16, 12), color::Fg(color::Rgb(215, 247, 241)), c, color::Fg(color::Reset))
                     .map_err(|e| UserError::WriteError(e))?;
                 guard.flush()
                     .map_err(|e| UserError::WriteError(e))?;
@@ -55,7 +55,7 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
             }
             Ok(Key::Ctrl('q')) => {
                 let mut guard = stdout.lock();
-                write!(guard, "{}{}{}{}{}", cursor::Goto(1, 17), clear::CurrentLine, color::Fg(color::Cyan), "GOODBYE", color::Fg(color::Reset))
+                write!(guard, "{}{}{}{}{}", cursor::Goto(1, 12), clear::CurrentLine, color::Fg(color::Cyan), "GOODBYE", color::Fg(color::Reset))
                     .map_err(|e| UserError::WriteError(e))?;
                 guard.flush()
                     .map_err(|e| UserError::WriteError(e))?;
@@ -64,7 +64,7 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
             Ok(Key::Backspace) if buf.len() > 0 => {
                 // First remove the character from the prompt
                 let mut guard = stdout.lock();
-                write!(guard, "{}{}", cursor::Goto(4 + buf.len() as u16 - 1, 17), clear::AfterCursor)
+                write!(guard, "{}{}", cursor::Goto(4 + buf.len() as u16 - 1, 12), clear::AfterCursor)
                     .map_err(|e| UserError::WriteError(e))?;
                 guard.flush().map_err(|e| UserError::WriteError(e))?;
                 buf.pop();
@@ -103,19 +103,19 @@ where
         .map_err(|e| UserError::WriteError(e))?;
 
     // Write white space
-    write!(stdout, "{}{}", cursor::Goto(1, 2), "\n".repeat(16))
+    write!(stdout, "{}{}", cursor::Goto(1, 2), "\n".repeat(11))
         .map_err(|e| UserError::WriteError(e))?;
     stdout.flush()
         .map_err(|e| UserError::WriteError(e))?;
 
     // Write prompt window border
-    write!(stdout, "{}{}{}{}{}{}\n", cursor::Goto(1, 16), style::Bold, color::Fg(color::Rgb(3, 169, 252)), "-".repeat(80), style::Reset, color::Fg(color::Reset))
+    write!(stdout, "{}{}{}{}{}{}\n", cursor::Goto(1, 11), style::Bold, color::Fg(color::Rgb(3, 169, 252)), "-".repeat(80), style::Reset, color::Fg(color::Reset))
         .map_err(|e| UserError::WriteError(e))?;
     stdout.flush()
         .map_err(|e| UserError::WriteError(e))?;
 
     // Write prompt
-    write!(stdout, "{}{}{}{}", cursor::Goto(1, 17), color::Fg(color::Rgb(250, 250, 237)), ">>>", color::Fg(color::Reset))
+    write!(stdout, "{}{}{}{}", cursor::Goto(1, 12), color::Fg(color::Rgb(250, 250, 237)), ">>>", color::Fg(color::Reset))
         .map_err(|e| UserError::WriteError(e))?;
     stdout.flush()
         .map_err(|e| UserError::WriteError(e))?;
@@ -139,7 +139,7 @@ where
     let mut to_server = to_server;
 
     // For keeping track of messages
-    let mut msg_queue = VecDeque::with_capacity(14);
+    let mut msg_queue = VecDeque::with_capacity(9);
 
     loop {
         // Select from receiving input sources
@@ -187,7 +187,7 @@ where
         };
 
         // Check if we have reached message capacity with the queue
-        if msg_queue.len() == 14 {
+        if msg_queue.len() == 9 {
             msg_queue.pop_front();
         }
         msg_queue.push_back(msg);
@@ -195,7 +195,7 @@ where
         // Get lock for standard out
         let mut guard = stdout.lock();
         // For keeping track of the current row
-        let mut row = 15;
+        let mut row = 10;
         for msg in msg_queue.iter().rev() {
             write!(guard, "{}{}{}{}{}", cursor::Goto(1, row), clear::CurrentLine, color::Fg(color::Rgb(215, 247, 241)), msg, color::Fg(color::Reset))
                 .map_err(|e| UserError::WriteError(e))?;
@@ -207,7 +207,7 @@ where
 
     // Reset cursor
     let mut guard = stdout.lock();
-    write!(guard, "{}{}{}{}", cursor::Goto(1, 1), clear::All, color::Fg(color::Reset), cursor::Show)
+    write!(guard, "{}{}{}", cursor::Goto(1, 1), clear::All, color::Fg(color::Reset))
         .map_err(|e| UserError::WriteError(e))?;
     guard.flush()
         .map_err(|e| UserError::WriteError(e))?;

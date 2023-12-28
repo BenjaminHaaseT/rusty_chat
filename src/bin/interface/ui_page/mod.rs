@@ -367,7 +367,7 @@ impl UIPage {
                     //     .map_err(|e| UserError::ReadError(e))?;
 
                     // Read line from client input
-                    let selected_username = read_line_from_client_input(&mut stdout)?;
+                    let selected_username = read_line_from_client_input(&mut stdout, 2, 37)?;
 
                     // Ensure we remove leading/trailing white space
                     let selected_username = selected_username.trim().to_owned();
@@ -453,12 +453,14 @@ impl UIPage {
 
                 write!(
                     stdout, "{}{}{}{}{}\n",
-                    cursor::Goto(1, prompt_offset), clear::CurrentLine,
+                    cursor::Goto(1, prompt_offset + 1), clear::CurrentLine,
                     color::Fg(color::Rgb(116, 179, 252)),
                     "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
                     color::Fg(color::Reset)
                 ).map_err(|e| UserError::WriteError(e))?;
                 stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+                let mut input_row = prompt_offset + 1;
 
                 // Get users input, validate it inside a loop
                 let users_request = loop {
@@ -482,7 +484,7 @@ impl UIPage {
                     //     .map_err(|e| UserError::ReadError(e))?;
 
                     // Read buffer from client input
-                    let buf = read_line_from_client_input(&mut stdout)?;
+                    let buf = read_line_from_client_input(&mut stdout, prompt_offset + 2, 1)?;
                     let buf = buf.trim().to_owned();
 
                     // Ensure buf is not empty
@@ -504,6 +506,7 @@ impl UIPage {
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        // input_row = prompt_offset + 2;
                         // println!("please enter valid input, input cannot be empty");
                         // println!();
                     } else if buf.as_bytes().len() > 255 {
@@ -526,6 +529,8 @@ impl UIPage {
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         stdout.flush().map_err(|e| UserError::WriteError(e))?;
+                        input_row = prompt_offset + 2;
+
                         // println!("the chatroom name you entered is too long, length cannot exceed 255 bytes");
                         // println!("please enter valid input");
                         // println!();
@@ -589,9 +594,13 @@ impl UIPage {
                     },
                     "c" => {
                         // Validation loop pattern for getting users selected chatroom name
+                        write!(stdout, "{}{}", cursor::Goto(1, 1), clear::All)
+                            .map_err(|e| UserError::WriteError(e))?;
+                        stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
                         let chatroom_name = loop {
                             write!(
-                                stdout, "{}{}{}{}{}\n",
+                                stdout, "{}{}{}{}{}",
                                 cursor::Goto(1, 2), clear::AfterCursor,
                                 color::Fg(color::Rgb(116, 179, 252)),
                                 "chatroom name: ", color::Fg(color::Reset)
@@ -604,13 +613,13 @@ impl UIPage {
                             //     .map_err(|e| UserError::ReadError(e))?;
 
                             // Read buffer from client input
-                            let buf = read_line_from_client_input(&mut stdout)?;
+                            let buf = read_line_from_client_input(&mut stdout, 2, 16)?;
                             let buf = buf.trim().to_owned();
 
                             if buf.is_empty() {
                                 write!(
                                     stdout, "{}{}{}{}{}\n",
-                                    cursor::Goto(1, 2), clear::AfterCursor,
+                                    cursor::Goto(1, 1), clear::AfterCursor,
                                     color::Fg(color::Rgb(116, 179, 252)),
                                     "chatroom name cannot be empty, please enter a valid chatroom name",
                                     color::Fg(color::Reset)
@@ -621,7 +630,7 @@ impl UIPage {
                             } else if buf.as_bytes().len() > 255 {
                                 write!(
                                     stdout, "{}{}{}{}{}\n",
-                                    cursor::Goto(1, 2), clear::AfterCursor,
+                                    cursor::Goto(1, 1), clear::AfterCursor,
                                     color::Fg(color::Rgb(116, 179, 252)),
                                     "chatroom name length cannot exceed 255 bytes, please enter a valid chatroom name",
                                     color::Fg(color::Reset)
@@ -700,7 +709,7 @@ impl UIPage {
 
 /// Helper function for reading client input from stdin while using 'IntoRawMode' trait with
 /// stdout.
-fn read_line_from_client_input(stdout: &mut RawTerminal<Stdout>) -> Result<String, UserError> {
+fn read_line_from_client_input(stdout: &mut RawTerminal<Stdout>, row: u16, col: u16) -> Result<String, UserError> {
     let mut keys = stdin().keys();
     let mut buf = String::new();
     loop {
@@ -713,7 +722,8 @@ fn read_line_from_client_input(stdout: &mut RawTerminal<Stdout>) -> Result<Strin
             }
             Ok(Key::Char(c)) => {
                 write!(
-                    stdout, "{}{}{}",
+                    stdout, "{}{}{}{}",
+                    cursor::Goto(col + buf.len() as u16, row),
                     color::Fg(color::Rgb(215, 247, 241)),
                     c, color::Fg(color::Reset)
                 ).map_err(|e| UserError::WriteError(e))?;
