@@ -142,6 +142,8 @@ impl UIPage {
                     Response::ExitLobby => {
                         // println!("Goodbye {}", username);
                         // Goodbye message
+                        write!(out, "{}{}", clear::BeforeCursor, clear::AfterCursor).map_err(|e| UserError::WriteError(e))?;
+                        out.flush().map_err(|e| UserError::WriteError(e))?;
                         write!(
                             out, "{}{}{}{}{}",
                             cursor::Goto(1, 1), clear::All,
@@ -370,11 +372,13 @@ impl UIPage {
                 // valid username
                 let username = loop {
                     write!(
-                        out, "{}{}{}{}{}",
+                        out, "{}{}{}{}{}{}{}",
                         cursor::Goto(1, 3), clear::CurrentLine,
                         color::Fg(color::Rgb(215, 247, 241)),
-                        "enter desired username: ",
-                        color::Fg(color::Reset)
+                        style::Underline,
+                        "enter desired username:",
+                        color::Fg(color::Reset),
+                        style::Reset
                     ).map_err(|e| UserError::WriteError(e))?;
                     out.flush().map_err(|e| UserError::WriteError(e))?;
                     // println!("Please enter your username: ");
@@ -385,7 +389,7 @@ impl UIPage {
                     //     .map_err(|e| UserError::ReadError(e))?;
 
                     // Read line from client input
-                    let selected_username = read_line_from_client_input(out, 3, 37)?;
+                    let selected_username = read_line_from_client_input(out, 3, 25)?;
 
                     // Ensure we remove leading/trailing white space
                     let selected_username = selected_username.trim().to_owned();
@@ -628,10 +632,12 @@ impl UIPage {
                             // out.flush().map_err(|e| UserError::WriteError(e))?;
 
                             write!(
-                                out, "{}{}{}{}{}",
+                                out, "{}{}{}{}{}{}{}",
                                 cursor::Goto(1, prompt_offset + 1), clear::AfterCursor,
+                                style::Underline,
                                 color::Fg(color::Rgb(116, 179, 252)),
-                                "chatroom name: ", color::Fg(color::Reset)
+                                "chatroom name:", color::Fg(color::Reset),
+                                style::Reset,
                             ).map_err(|e| UserError::WriteError(e))?;
                             out.flush().map_err(|e| UserError::WriteError(e))?;
 
