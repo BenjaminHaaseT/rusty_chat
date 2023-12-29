@@ -1,9 +1,12 @@
 // use std::net::ToSocketAddrs;
 use std::fmt::Debug;
 use std::io::{Write as StdWrite, stdout};
+use std::thread;
+use std::time::Duration;
 use async_std::{
     net::{TcpStream, ToSocketAddrs},
-    io::{Read, ReadExt, Write, WriteExt, BufRead, BufReader, prelude::BufReadExt, stdin}
+    io::{Read, ReadExt, Write, WriteExt, BufRead, BufReader, prelude::BufReadExt, stdin},
+    task
 };
 use termion::{raw::IntoRawMode, cursor, color, clear};
 
@@ -32,6 +35,10 @@ impl Interface {
             format!("Connecting to {:?}...", addrs), color::Fg(color::Reset)
         ).map_err(|e| UserError::WriteError(e))?;
         stdout.flush().map_err(|e| UserError::WriteError(e))?;
+
+        task::spawn_blocking(|| {
+            thread::sleep(Duration::from_millis(1000))
+        }).await;
 
         let mut stream = TcpStream::connect(addrs).await.map_err(|e| UserError::ConnectionError(e))?;
 
