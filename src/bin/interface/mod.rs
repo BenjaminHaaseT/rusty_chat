@@ -19,7 +19,6 @@ pub mod prelude {
     pub use super::*;
 }
 
-
 /// Encapsulates the client UI functionality
 pub struct Interface;
 
