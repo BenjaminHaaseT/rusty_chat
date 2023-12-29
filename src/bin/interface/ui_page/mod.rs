@@ -456,7 +456,7 @@ impl UIPage {
                         out, "{}{}{}{}{}\n",
                         cursor::Goto(1, 2), clear::CurrentLine,
                         color::Fg(color::Rgb(116, 179, 252)),
-                        format!("{:<w$} ~ {:<9}", "Chatroom", "Capacity", w=max_chatroom_name_length),
+                        format!("{:<w$} ~ {:>9}", "Chatroom", "Capacity", w=max_chatroom_name_length),
                         color::Fg(color::Reset)
                     ).map_err(|e| UserError::WriteError(e))?;
                     out.flush().map_err(|e| UserError::WriteError(e))?;
