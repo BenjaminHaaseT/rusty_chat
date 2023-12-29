@@ -8,7 +8,7 @@ use async_std::{
     task,
 };
 use futures::{Future, FutureExt, Stream, StreamExt, select, stream};
-use termion::{clear, cursor, style, color, input::TermRead, event::Key, raw::IntoRawMode, async_stdin};
+use termion::{clear, cursor, style, color, input::TermRead, event::Key, raw::IntoRawMode};
 use crate::UserError;
 use rusty_chat::prelude::*;
 pub mod prelude {

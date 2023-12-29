@@ -53,12 +53,12 @@ impl Interface {
         // main loop
         loop {
             // Attempt to parse response from server, and transition state of ui
-            ui = ui.state_from_response(from_server).await?;
+            ui = ui.state_from_response(&mut stdout, from_server).await?;
             if ui.is_quit_lobby() {
                 break;
             }
             // Attempt to read client input and send a request to the server
-            ui.process_request(&mut from_client, to_server, from_server).await?;
+            ui.process_request(&mut stdout, &mut from_client, to_server, from_server).await?;
         }
 
         write!(stdout, "\n\r{}", cursor::Show).map_err(|e| UserError::WriteError(e))?;
