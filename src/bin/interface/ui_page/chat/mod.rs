@@ -88,9 +88,8 @@ where
     // Display custom window and prompt
     write!(
         stdout,
-        "{}{}{}{}{}{}{:-^80}{}{}",
+        "{}{}{}{}{}{:-^80}{}{}",
         cursor::Goto(1, 1),
-        clear::BeforeCursor,
         clear::AfterCursor,
         cursor::Hide,
         style::Bold,
