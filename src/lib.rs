@@ -397,19 +397,6 @@ impl Response {
         }
     }
 
-    // /// Helper method to reduce code duplication when serializing a `Response`
-    // ///
-    // /// Many `Response` variants have fields which have a length property that needs to be serialized.
-    // /// This method provides the functionality to do this.
-    // /// Takes `tag`, the tag that we are serializing the `Response` into, `idx` the starting position
-    // /// from which to start serializing a length value and `length`, the value that represents the length
-    // /// we wish to serialize
-    // fn serialize_name_length(tag: &mut ResponseEncodeTag, idx: usize, length: u8) {
-    //     for i in idx ..idx + 4 {
-    //         tag[i] ^= (length >> ((i - idx) * 8)) as u8;
-    //     }
-    // }
-
     /// Helper method to reduce code duplication when serializing a `Response`
     ///
     /// Many `Response` variants have fields which have a length property that needs to be serialized.

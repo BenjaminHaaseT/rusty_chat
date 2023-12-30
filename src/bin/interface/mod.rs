@@ -8,6 +8,7 @@ use async_std::{
     io::{Read, ReadExt, Write, WriteExt, BufRead, BufReader, prelude::BufReadExt, stdin},
     task
 };
+
 use termion::{raw::IntoRawMode, cursor, color, clear};
 
 use crate::interface::ui_page::UIPage;
