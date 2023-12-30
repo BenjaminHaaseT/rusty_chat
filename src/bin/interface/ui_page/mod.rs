@@ -72,194 +72,198 @@ impl UIPage {
         // execute the logic to transition to the next state, and finally return the next UIPage in the progression
         match self {
             UIPage::WelcomePage => {
-                if !response.is_connection_ok() {
-                    // Something wrong happened on the server's side, this should be kept hidden from
-                    // client so display an InternalServerError instead
-                    return Err(UserError::InternalServerError("an internal server error occurred"));
-                }
-                // Display the state to the client
-                write!(
-                    out, "{}{}{}{}{}{:-^80}{}{}",
-                    clear::BeforeCursor, clear::AfterCursor, cursor::Goto(1, 1),
-                    color::Fg(color::Rgb(116, 179, 252)),
-                    style::Bold, "Welcome To Rusty Chat!",
-                    style::Reset, color::Fg(color::Reset)
-                ).map_err(|e| UserError::WriteError(e))?;
-                out.flush().map_err(|e| UserError::WriteError(e))?;
-
-                // Return the next state that should be transitioned to
-                Ok(UIPage::UsernamePage)
+                // if !response.is_connection_ok() {
+                //     // Something wrong happened on the server's side, this should be kept hidden from
+                //     // client so display an InternalServerError instead
+                //     return Err(UserError::InternalServerError("an internal server error occurred"));
+                // }
+                // // Display the state to the client
+                // write!(
+                //     out, "{}{}{}{}{}{:-^80}{}{}",
+                //     clear::BeforeCursor, clear::AfterCursor, cursor::Goto(1, 1),
+                //     color::Fg(color::Rgb(116, 179, 252)),
+                //     style::Bold, "Welcome To Rusty Chat!",
+                //     style::Reset, color::Fg(color::Reset)
+                // ).map_err(|e| UserError::WriteError(e))?;
+                // out.flush().map_err(|e| UserError::WriteError(e))?;
+                //
+                // // Return the next state that should be transitioned to
+                // Ok(UIPage::UsernamePage)
+                UIPage::welcome_page_state_from_response_helper(response, out)
             },
             UIPage::UsernamePage => {
-                match response {
-                    Response::UsernameAlreadyExists { username} => {
-                        // Write feedback to client
-                        write!(
-                            out, "{}{}{}{}{}",
-                            cursor::Goto(1, 2), clear::CurrentLine,
-                            color::Fg(color::Rgb(202, 227, 113)),
-                            format!("Sorry, but '{}' is already taken", username),
-                            color::Fg(color::Reset)
-                        ).map_err(|e| UserError::WriteError(e))?;
-                        out.flush().map_err(|e| UserError::WriteError(e))?;
-
-                        Ok(UIPage::UsernamePage)
-                    }
-                    Response::UsernameOk { username, lobby_state} => {
-                        // Parse the lobby state
-                        let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
-                            .map_err(|e| UserError::ParseLobby(e))?;
-
-                        // Ensure frames are sorted by name
-                        chatroom_frames.frames.sort_by(|f1, f2| f1.name.cmp(&f2.name));
-
-                        // Create new Lobby page and return
-                        Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames })
-                    }
-                    _ => Err(UserError::InternalServerError("an internal server error occurred")),
-                }
+                // match response {
+                //     Response::UsernameAlreadyExists { username} => {
+                //         // Write feedback to client
+                //         write!(
+                //             out, "{}{}{}{}{}",
+                //             cursor::Goto(1, 2), clear::CurrentLine,
+                //             color::Fg(color::Rgb(202, 227, 113)),
+                //             format!("Sorry, but '{}' is already taken", username),
+                //             color::Fg(color::Reset)
+                //         ).map_err(|e| UserError::WriteError(e))?;
+                //         out.flush().map_err(|e| UserError::WriteError(e))?;
+                //
+                //         Ok(UIPage::UsernamePage)
+                //     }
+                //     Response::UsernameOk { username, lobby_state} => {
+                //         // Parse the lobby state
+                //         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
+                //             .map_err(|e| UserError::ParseLobby(e))?;
+                //
+                //         // Ensure frames are sorted by name
+                //         chatroom_frames.frames.sort_by(|f1, f2| f1.name.cmp(&f2.name));
+                //
+                //         // Create new Lobby page and return
+                //         Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames })
+                //     }
+                //     _ => Err(UserError::InternalServerError("an internal server error occurred")),
+                // }
+                UIPage::username_page_state_from_response_helper(response, out)
             },
             UIPage::LobbyPage {username, lobby_state} => {
-                match response {
-                    Response::ExitLobby => {
-                        // Goodbye message
-                        write!(out, "{}{}", clear::BeforeCursor, clear::AfterCursor).map_err(|e| UserError::WriteError(e))?;
-                        out.flush().map_err(|e| UserError::WriteError(e))?;
-                        write!(
-                            out, "{}{}{}{}{}",
-                            cursor::Goto(1, 1), clear::All,
-                            color::Fg(color::Cyan), format!("Goodbye {}", username),
-                            color::Fg(color::Reset)
-                        ).map_err(|e| UserError::WriteError(e))?;
-                        out.flush().map_err(|e| UserError::WriteError(e))?;
-
-                        // Reset cursor
-                        write!(out, "{}", cursor::Show).map_err(|e| UserError::WriteError(e))?;
-                        out.flush().map_err(|e| UserError::WriteError(e))?;
-
-                        // Signals to interface that main loop should exit
-                        Ok(UIPage::QuitLobbyPage)
-                    }
-                    Response::Subscribed {chatroom_name} => {
-                        // Needs to start chatroom_prompt routine. First await for confirmation that
-                        // client's read/write tasks are both connected to chatroom broker.
-                        let confirmation_response = Response::try_parse(&mut from_server)
-                            .await
-                            .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
-
-                        // We need to ensure that we receive Response::ReadSync variant, this should be the only
-                        // response that the client receives during this state
-                        if !confirmation_response.is_read_sync() {
-                            return Err(UserError::InternalServerError("an internal server error occurred"));
-                        }
-                        // Display message to client they have successfully connected to the chatroom
-
-                        // Chatroom page signals that chatroom procedure needs to be started
-                        Ok(UIPage::Chatroom { username, chatroom_name})
-                    }
-                    Response::ChatroomCreated {chatroom_name} => {
-                        // Needs to start chatroom_prompt routine. First await for confirmation that
-                        // client's read/write tasks are both connected to chatroom broker.
-                        let confirmation_response = Response::try_parse(&mut from_server)
-                            .await
-                            .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
-
-                        // We need to ensure that we receive Response::ReadSync variant, this should be the only
-                        // response that the client receives during this state
-                        if !confirmation_response.is_read_sync() {
-                            return Err(UserError::InternalServerError("an internal server error occurred"));
-                        }
-
-                        // Chatroom page signals that chatroom procedure needs to be started
-                        Ok(UIPage::Chatroom { username, chatroom_name})
-                    }
-                    Response::ReadSync => {
-                        // Needs to start chatroom_prompt routine. First await for confirmation that
-                        // client's read/write tasks are both connected to chatroom broker.
-                        let confirmation_response = Response::try_parse(&mut from_server)
-                            .await
-                            .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
-                         match confirmation_response {
-                            Response::ChatroomCreated {chatroom_name} => {
-                                // Chatroom page signals that chatroom procedure needs to be started
-                                Ok(UIPage::Chatroom { username, chatroom_name})
-                            },
-                            Response::Subscribed {chatroom_name} => {
-                                // Chatroom page signals that chatroom procedure needs to be started
-                                Ok(UIPage::Chatroom { username, chatroom_name})
-                            },
-                            _ => Err(UserError::InternalServerError("an internal server error occurred")),
-                        }
-                    }
-                    Response::ChatroomDoesNotExist {chatroom_name, lobby_state} => {
-                        // Display feedback to client
-                        write!(
-                            out, "{}{}{}{}{}{}",
-                            cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
-                            color::Fg(color::Rgb(202, 227, 113)), format!("Unable to join {}, chatroom: {} does not exist any longer. Refreshing lobby...", chatroom_name, chatroom_name),
-                            color::Fg(color::Reset)
-                        ).map_err(|e| UserError::WriteError(e))?;
-                        out.flush().map_err(|e| UserError::WriteError(e))?;
-                        // Ensure thread sleeps so client can read feedback before UI updates
-                        task::spawn_blocking(|| {
-                            thread::sleep(Duration::from_millis(1500));
-                        }).await;
-                        // println!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name);
-                        // Parse the lobby state
-                        let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
-                            .map_err(|e| UserError::ParseLobby(e))?;
-                        chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
-                        Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames})
-                    }
-                    Response::ChatroomAlreadyExists {chatroom_name, lobby_state} => {
-                        // Display feedback to client
-                        write!(
-                            out, "{}{}{}{}{}{}",
-                            cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
-                            color::Fg(color::Rgb(202, 227, 113)), format!("Unable to create chatroom {}, chatroom: {} already created. Refreshing lobby...", chatroom_name, chatroom_name),
-                            color::Fg(color::Reset)
-                        ).map_err(|e| UserError::WriteError(e))?;
-                        out.flush().map_err(|e| UserError::WriteError(e))?;
-
-                        task::spawn_blocking(|| {
-                            thread::sleep(Duration::from_millis(1500));
-                        }).await;
-
-                        // Parse the lobby state
-                        let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
-                            .map_err(|e| UserError::ParseLobby(e))?;
-
-                        chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
-                        Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames})
-                    }
-                    _ => Err(UserError::InternalServerError("an internal server error occurred"))
-                }
+                // match response {
+                //     Response::ExitLobby => {
+                //         // Goodbye message
+                //         write!(out, "{}{}", clear::BeforeCursor, clear::AfterCursor).map_err(|e| UserError::WriteError(e))?;
+                //         out.flush().map_err(|e| UserError::WriteError(e))?;
+                //         write!(
+                //             out, "{}{}{}{}{}",
+                //             cursor::Goto(1, 1), clear::All,
+                //             color::Fg(color::Cyan), format!("Goodbye {}", username),
+                //             color::Fg(color::Reset)
+                //         ).map_err(|e| UserError::WriteError(e))?;
+                //         out.flush().map_err(|e| UserError::WriteError(e))?;
+                //
+                //         // Reset cursor
+                //         write!(out, "{}", cursor::Show).map_err(|e| UserError::WriteError(e))?;
+                //         out.flush().map_err(|e| UserError::WriteError(e))?;
+                //
+                //         // Signals to interface that main loop should exit
+                //         Ok(UIPage::QuitLobbyPage)
+                //     }
+                //     Response::Subscribed {chatroom_name} => {
+                //         // Needs to start chatroom_prompt routine. First await for confirmation that
+                //         // client's read/write tasks are both connected to chatroom broker.
+                //         let confirmation_response = Response::try_parse(&mut from_server)
+                //             .await
+                //             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+                //
+                //         // We need to ensure that we receive Response::ReadSync variant, this should be the only
+                //         // response that the client receives during this state
+                //         if !confirmation_response.is_read_sync() {
+                //             return Err(UserError::InternalServerError("an internal server error occurred"));
+                //         }
+                //         // Display message to client they have successfully connected to the chatroom
+                //
+                //         // Chatroom page signals that chatroom procedure needs to be started
+                //         Ok(UIPage::Chatroom { username, chatroom_name})
+                //     }
+                //     Response::ChatroomCreated {chatroom_name} => {
+                //         // Needs to start chatroom_prompt routine. First await for confirmation that
+                //         // client's read/write tasks are both connected to chatroom broker.
+                //         let confirmation_response = Response::try_parse(&mut from_server)
+                //             .await
+                //             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+                //
+                //         // We need to ensure that we receive Response::ReadSync variant, this should be the only
+                //         // response that the client receives during this state
+                //         if !confirmation_response.is_read_sync() {
+                //             return Err(UserError::InternalServerError("an internal server error occurred"));
+                //         }
+                //
+                //         // Chatroom page signals that chatroom procedure needs to be started
+                //         Ok(UIPage::Chatroom { username, chatroom_name})
+                //     }
+                //     Response::ReadSync => {
+                //         // Needs to start chatroom_prompt routine. First await for confirmation that
+                //         // client's read/write tasks are both connected to chatroom broker.
+                //         let confirmation_response = Response::try_parse(&mut from_server)
+                //             .await
+                //             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+                //          match confirmation_response {
+                //             Response::ChatroomCreated {chatroom_name} => {
+                //                 // Chatroom page signals that chatroom procedure needs to be started
+                //                 Ok(UIPage::Chatroom { username, chatroom_name})
+                //             },
+                //             Response::Subscribed {chatroom_name} => {
+                //                 // Chatroom page signals that chatroom procedure needs to be started
+                //                 Ok(UIPage::Chatroom { username, chatroom_name})
+                //             },
+                //             _ => Err(UserError::InternalServerError("an internal server error occurred")),
+                //         }
+                //     }
+                //     Response::ChatroomDoesNotExist {chatroom_name, lobby_state} => {
+                //         // Display feedback to client
+                //         write!(
+                //             out, "{}{}{}{}{}{}",
+                //             cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
+                //             color::Fg(color::Rgb(202, 227, 113)), format!("Chatroom: {} no longer exists. Refreshing lobby...", chatroom_name),
+                //             color::Fg(color::Reset)
+                //         ).map_err(|e| UserError::WriteError(e))?;
+                //         out.flush().map_err(|e| UserError::WriteError(e))?;
+                //         // Ensure thread sleeps so client can read feedback before UI updates
+                //         task::spawn_blocking(|| {
+                //             thread::sleep(Duration::from_millis(1750));
+                //         }).await;
+                //         // println!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name);
+                //         // Parse the lobby state
+                //         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
+                //             .map_err(|e| UserError::ParseLobby(e))?;
+                //         chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
+                //         Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames})
+                //     }
+                //     Response::ChatroomAlreadyExists {chatroom_name, lobby_state} => {
+                //         // Display feedback to client
+                //         write!(
+                //             out, "{}{}{}{}{}{}",
+                //             cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
+                //             color::Fg(color::Rgb(202, 227, 113)), format!("Chatroom: {} already created. Refreshing lobby...", chatroom_name),
+                //             color::Fg(color::Reset)
+                //         ).map_err(|e| UserError::WriteError(e))?;
+                //         out.flush().map_err(|e| UserError::WriteError(e))?;
+                //
+                //         task::spawn_blocking(|| {
+                //             thread::sleep(Duration::from_millis(1750));
+                //         }).await;
+                //
+                //         // Parse the lobby state
+                //         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
+                //             .map_err(|e| UserError::ParseLobby(e))?;
+                //
+                //         chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
+                //         Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames})
+                //     }
+                //     _ => Err(UserError::InternalServerError("an internal server error occurred"))
+                // }
+                UIPage::lobby_page_state_from_response_helper(username, from_server, response, out).await
             }
             UIPage::Chatroom {username, chatroom_name} => {
-                // We just need to ensure the client receives a ExitChatroom response
-                // and return a QuitChatroom variant
-                match response {
-                    Response::ExitChatroom {chatroom_name} => {
-                        // println!("Left chatroom {}", chatroom_name);
-                        Ok(UIPage::QuitChatroom {username, chatroom_name})
-                    }
-                    _ => Err(UserError::InternalServerError("an internal server error occurred")),
-                }
+                // // We just need to ensure the client receives a ExitChatroom response
+                // // and return a QuitChatroom variant
+                // match response {
+                //     Response::ExitChatroom {chatroom_name} => {
+                //         Ok(UIPage::QuitChatroom {username, chatroom_name})
+                //     }
+                //     _ => Err(UserError::InternalServerError("an internal server error occurred")),
+                // }
+                UIPage::chatroom_state_from_response_helper(username, response)
             }
             UIPage::QuitChatroom {username, chatroom_name} => {
-                // We just need to ensure the client receives a Lobby response
-                match response {
-                    Response::Lobby {lobby_state} => {
-                        // Parse the lobby state
-                        let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
-                            .map_err(|e| UserError::ParseLobby(e))?;
-
-                        chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
-                        // Create new Lobby page and return
-                        Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames })
-                    }
-                    _ => Err(UserError::InternalServerError("an internal server error occurred")),
-                }
+                // // We just need to ensure the client receives a Lobby response
+                // match response {
+                //     Response::Lobby {lobby_state} => {
+                //         // Parse the lobby state
+                //         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
+                //             .map_err(|e| UserError::ParseLobby(e))?;
+                //
+                //         chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
+                //         // Create new Lobby page and return
+                //         Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames })
+                //     }
+                //     _ => Err(UserError::InternalServerError("an internal server error occurred")),
+                // }
+                UIPage::quit_chatroom_state_from_response_helper(username, response)
             }
             _ => return Err(UserError::InternalServerError("an internal server error occurred")),
         }
@@ -287,10 +291,12 @@ impl UIPage {
         // let mut from_client = from_client;
         let mut to_server = to_server;
         let mut from_server = from_server;
+
         match self {
             // If this matches, we know client has successfully connected to the server.
             // So client needs to be prompted to enter a username.
             UIPage::UsernamePage => {
+
                 // Prompt the user for a valid username. Use a loop to validate user has entered a
                 // valid username
                 let username = loop {
@@ -366,7 +372,7 @@ impl UIPage {
                         lobby_state.frames.iter().map(|f| f.name.len()).max().unwrap(),
                         8
                     );
-
+                    // Write header for chatroom/capacity table
                     write!(
                         out, "{}{}{}{}{}\n",
                         cursor::Goto(1, 2), clear::CurrentLine,
@@ -375,7 +381,7 @@ impl UIPage {
                         color::Fg(color::Reset)
                     ).map_err(|e| UserError::WriteError(e))?;
                     out.flush().map_err(|e| UserError::WriteError(e))?;
-
+                    // Write chatroom/capacity table from lobby_state
                     for (i, frame) in lobby_state.frames.iter().enumerate() {
                         write!(
                             out, "{}{}{}{}{}\n",
@@ -389,15 +395,6 @@ impl UIPage {
                 }
 
                 let prompt_offset = (lobby_state.frames.len() + 4) as u16;
-
-                // write!(
-                //     out, "{}{}{}{}{}",
-                //     cursor::Goto(1, prompt_offset + 1), clear::CurrentLine,
-                //     color::Fg(color::Rgb(116, 179, 252)),
-                //     "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
-                //     color::Fg(color::Reset)
-                // ).map_err(|e| UserError::WriteError(e))?;
-                // out.flush().map_err(|e| UserError::WriteError(e))?;
 
                 // Validate users input using validation loop pattern
                 let users_request = loop {
@@ -478,13 +475,8 @@ impl UIPage {
                             .map_err(|e| UserError::WriteError(e))?;
                         out.flush().map_err(|e| UserError::WriteError(e))?;
 
+                        // Validation loop for validating users input
                         let chatroom_name = loop {
-                            // Ensure warning message was cleared if one exists
-                            // write!(
-                            //     out, "{}{}",
-                            //     cursor::Goto(1, prompt_offset), clear::AfterCursor
-                            // ).map_err(|e| UserError::WriteError(e))?;
-                            // out.flush().map_err(|e| UserError::WriteError(e))?;
 
                             write!(
                                 out, "{}{}{}{}{}{}{}",
@@ -495,11 +487,6 @@ impl UIPage {
                                 style::Reset,
                             ).map_err(|e| UserError::WriteError(e))?;
                             out.flush().map_err(|e| UserError::WriteError(e))?;
-
-                            // let mut buf = String::new();
-                            // from_client.read_line(&mut buf)
-                            //     .await
-                            //     .map_err(|e| UserError::ReadError(e))?;
 
                             // Read buffer from client input
                             let buf = read_line_from_client_input(out, prompt_offset + 1, 16)?;
@@ -525,8 +512,6 @@ impl UIPage {
                                     color::Fg(color::Reset)
                                 ).map_err(|e| UserError::WriteError(e))?;
                                 out.flush().map_err(|e| UserError::WriteError(e))?;
-
-                                // println!("chatroom name length cannot exceed 255 bytes, please enter valid input.");
                             } else {
                                 break buf;
                             }
@@ -553,6 +538,8 @@ impl UIPage {
                 // Clear the current window
                 write!(out, "{}{}", clear::BeforeCursor, clear::AfterCursor).map_err(|e| UserError::WriteError(e))?;
                 out.flush().map_err(|e| UserError::WriteError(e))?;
+
+                // Proceed with an alternate screen until chatroom procedure has finished
                 let mut alt_out = stdout().into_raw_mode().unwrap().into_alternate_screen().unwrap();
                 write!(
                     alt_out, "{}{}",
@@ -562,37 +549,12 @@ impl UIPage {
 
                 // Start the chatroom procedure
                 chat_window_task(username, chatroom_name, &mut from_server, &mut to_server).await?;
-                // client has left
-                // write!(
-                //     out, "{}{}{}{}{}{}",
-                //     cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
-                //     color::Fg(color::Cyan), format!("Leaving chatroom {}...", chatroom_name),
-                //     color::Fg(color::Reset)
-                // ).map_err(|e| UserError::WriteError(e))?;
-                // out.flush().map_err(|e| UserError::WriteError(e))?;
-                // task::spawn_blocking(|| {
-                //     thread::sleep(Duration::from_millis(1000))
-                // }).await;
-
-                // println!("Leaving chatroom {}...", chatroom_name);
                 Ok(())
             }
 
             // If this matches, the client has successfully quit from a chatroom.
             UIPage::QuitChatroom {username, chatroom_name} => {
                 // Client just needs to send a request to server to refresh their lobby state
-                // write!(
-                //     out, "{}{}{}{}{}",
-                //     cursor::Goto(1, 1), clear::All,
-                //     color::Fg(color::Cyan),
-                //     format!("Re-entering lobby from {}...", chatroom_name),
-                //     color::Fg(color::Reset)
-                // ).map_err(|e| UserError::WriteError(e))?;
-                // out.flush().map_err(|e| UserError::WriteError(e))?;
-                // task::spawn_blocking(|| {
-                //     thread::sleep(Duration::from_millis(1000))
-                // }).await;
-                // println!("Re-entering lobby from {}...", chatroom_name);
                 to_server.write_all(&Frame::Lobby.as_bytes())
                     .await
                     .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
@@ -601,6 +563,216 @@ impl UIPage {
             _ => unreachable!()
         }
     }
+
+    /// Helper method for `state_from_response`, renders the `WelcomePage` and returns the next
+    /// state in the success case.
+    fn welcome_page_state_from_response_helper(response: Response, out: &mut RawTerminal<Stdout>) -> Result<UIPage, UserError> {
+        if !response.is_connection_ok() {
+            // Something wrong happened on the server's side, this should be kept hidden from
+            // client so display an InternalServerError instead
+            return Err(UserError::InternalServerError("an internal server error occurred"));
+        }
+        // Display the state to the client
+        write!(
+            out, "{}{}{}{}{}{:-^80}{}{}",
+            clear::BeforeCursor, clear::AfterCursor, cursor::Goto(1, 1),
+            color::Fg(color::Rgb(116, 179, 252)),
+            style::Bold, "Welcome To Rusty Chat!",
+            style::Reset, color::Fg(color::Reset)
+        ).map_err(|e| UserError::WriteError(e))?;
+        out.flush().map_err(|e| UserError::WriteError(e))?;
+
+        // Return the next state that should be transitioned to
+        Ok(UIPage::UsernamePage)
+    }
+
+    /// Helper method for `state_from_response`, renders the `UsernamePage` and returns the next
+    /// state in the success case.
+    fn username_page_state_from_response_helper(response: Response, out: &mut RawTerminal<Stdout>) -> Result<UIPage, UserError> {
+        match response {
+            Response::UsernameAlreadyExists { username} => {
+                // Write feedback to client
+                write!(
+                    out, "{}{}{}{}{}",
+                    cursor::Goto(1, 2), clear::CurrentLine,
+                    color::Fg(color::Rgb(202, 227, 113)),
+                    format!("Sorry, but '{}' is already taken", username),
+                    color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                out.flush().map_err(|e| UserError::WriteError(e))?;
+
+                Ok(UIPage::UsernamePage)
+            }
+            Response::UsernameOk { username, lobby_state} => {
+                // Parse the lobby state
+                let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
+                    .map_err(|e| UserError::ParseLobby(e))?;
+
+                // Ensure frames are sorted by name
+                chatroom_frames.frames.sort_by(|f1, f2| f1.name.cmp(&f2.name));
+
+                // Create new Lobby page and return
+                Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames })
+            }
+            _ => Err(UserError::InternalServerError("an internal server error occurred")),
+        }
+    }
+
+    /// Helper method for `state_from_response`, renders the `LobbyPage` and returns the next
+    /// state in the success case.
+    async fn lobby_page_state_from_response_helper<R: ReadExt + Unpin>(
+        username: String,
+        mut from_server: R,
+        response: Response,
+        out: &mut RawTerminal<Stdout>
+    ) -> Result<UIPage, UserError> {
+        match response {
+            Response::ExitLobby => {
+                // Goodbye message
+                write!(out, "{}{}", clear::BeforeCursor, clear::AfterCursor).map_err(|e| UserError::WriteError(e))?;
+                out.flush().map_err(|e| UserError::WriteError(e))?;
+                write!(
+                    out, "{}{}{}{}{}",
+                    cursor::Goto(1, 1), clear::All,
+                    color::Fg(color::Cyan), format!("Goodbye {}", username),
+                    color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                out.flush().map_err(|e| UserError::WriteError(e))?;
+
+                // Reset cursor
+                write!(out, "{}", cursor::Show).map_err(|e| UserError::WriteError(e))?;
+                out.flush().map_err(|e| UserError::WriteError(e))?;
+
+                // Signals to interface that main loop should exit
+                Ok(UIPage::QuitLobbyPage)
+            }
+            Response::Subscribed {chatroom_name} => {
+                // Needs to start chatroom_prompt routine. First await for confirmation that
+                // client's read/write tasks are both connected to chatroom broker.
+                let confirmation_response = Response::try_parse(&mut from_server)
+                    .await
+                    .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+
+                // We need to ensure that we receive Response::ReadSync variant, this should be the only
+                // response that the client receives during this state
+                if !confirmation_response.is_read_sync() {
+                    return Err(UserError::InternalServerError("an internal server error occurred"));
+                }
+                // Display message to client they have successfully connected to the chatroom
+
+                // Chatroom page signals that chatroom procedure needs to be started
+                Ok(UIPage::Chatroom { username, chatroom_name})
+            }
+            Response::ChatroomCreated {chatroom_name} => {
+                // Needs to start chatroom_prompt routine. First await for confirmation that
+                // client's read/write tasks are both connected to chatroom broker.
+                let confirmation_response = Response::try_parse(&mut from_server)
+                    .await
+                    .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+
+                // We need to ensure that we receive Response::ReadSync variant, this should be the only
+                // response that the client receives during this state
+                if !confirmation_response.is_read_sync() {
+                    return Err(UserError::InternalServerError("an internal server error occurred"));
+                }
+
+                // Chatroom page signals that chatroom procedure needs to be started
+                Ok(UIPage::Chatroom { username, chatroom_name})
+            }
+            Response::ReadSync => {
+                // Needs to start chatroom_prompt routine. First await for confirmation that
+                // client's read/write tasks are both connected to chatroom broker.
+                let confirmation_response = Response::try_parse(&mut from_server)
+                    .await
+                    .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+                match confirmation_response {
+                    Response::ChatroomCreated {chatroom_name} => {
+                        // Chatroom page signals that chatroom procedure needs to be started
+                        Ok(UIPage::Chatroom { username, chatroom_name})
+                    },
+                    Response::Subscribed {chatroom_name} => {
+                        // Chatroom page signals that chatroom procedure needs to be started
+                        Ok(UIPage::Chatroom { username, chatroom_name})
+                    },
+                    _ => Err(UserError::InternalServerError("an internal server error occurred")),
+                }
+            }
+            Response::ChatroomDoesNotExist {chatroom_name, lobby_state} => {
+                // Display feedback to client
+                write!(
+                    out, "{}{}{}{}{}{}",
+                    cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
+                    color::Fg(color::Rgb(202, 227, 113)), format!("Chatroom: {} no longer exists. Refreshing lobby...", chatroom_name),
+                    color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                out.flush().map_err(|e| UserError::WriteError(e))?;
+                // Ensure thread sleeps so client can read feedback before UI updates
+                task::spawn_blocking(|| {
+                    thread::sleep(Duration::from_millis(1750));
+                }).await;
+                // println!("Unable to join {}, chatroom: {} does not exist. Please select another option.", chatroom_name, chatroom_name);
+                // Parse the lobby state
+                let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
+                    .map_err(|e| UserError::ParseLobby(e))?;
+                chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
+                Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames})
+            }
+            Response::ChatroomAlreadyExists {chatroom_name, lobby_state} => {
+                // Display feedback to client
+                write!(
+                    out, "{}{}{}{}{}{}",
+                    cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
+                    color::Fg(color::Rgb(202, 227, 113)), format!("Chatroom: {} already created. Refreshing lobby...", chatroom_name),
+                    color::Fg(color::Reset)
+                ).map_err(|e| UserError::WriteError(e))?;
+                out.flush().map_err(|e| UserError::WriteError(e))?;
+
+                task::spawn_blocking(|| {
+                    thread::sleep(Duration::from_millis(1750));
+                }).await;
+
+                // Parse the lobby state
+                let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
+                    .map_err(|e| UserError::ParseLobby(e))?;
+
+                chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
+                Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames})
+            }
+            _ => Err(UserError::InternalServerError("an internal server error occurred"))
+        }
+    }
+
+    /// Helper method for `state_from_response`, renders the `LobbyPage` and returns the next
+    /// state in the success case.
+    fn chatroom_state_from_response_helper(username: String, response: Response) -> Result<UIPage, UserError> {
+        // We just need to ensure the client receives a ExitChatroom response
+        // and return a QuitChatroom variant
+        match response {
+            Response::ExitChatroom {chatroom_name} => {
+                Ok(UIPage::QuitChatroom {username, chatroom_name})
+            }
+            _ => Err(UserError::InternalServerError("an internal server error occurred")),
+        }
+    }
+
+    /// Helper method for `state_from_response`, renders the `LobbyPage` and returns the next
+    /// state in the success case.
+    fn quit_chatroom_state_from_response_helper(username: String, response: Response) -> Result<UIPage, UserError> {
+        // We just need to ensure the client receives a Lobby response
+        match response {
+            Response::Lobby {lobby_state} => {
+                // Parse the lobby state
+                let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
+                    .map_err(|e| UserError::ParseLobby(e))?;
+
+                chatroom_frames.frames.sort_by(|frame1, frame2| frame1.name.cmp(&frame2.name));
+                // Create new Lobby page and return
+                Ok(UIPage::LobbyPage {username, lobby_state: chatroom_frames })
+            }
+            _ => Err(UserError::InternalServerError("an internal server error occurred")),
+        }
+    }
+
 
     /// Returns true if the 'UIPage' is the 'QuitLobbyPage' variant, false otherwise.
     pub fn is_quit_lobby(&self) -> bool {
