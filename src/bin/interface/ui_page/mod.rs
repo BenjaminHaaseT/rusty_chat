@@ -635,7 +635,7 @@ impl UIPage {
                                 out, "{}{}{}{}{}{}{}",
                                 cursor::Goto(1, prompt_offset + 1), clear::AfterCursor,
                                 style::Underline,
-                                color::Fg(color::Rgb(116, 179, 252)),
+                                color::Fg(color::Rgb(215, 247, 241)),
                                 "chatroom name:", color::Fg(color::Reset),
                                 style::Reset,
                             ).map_err(|e| UserError::WriteError(e))?;
