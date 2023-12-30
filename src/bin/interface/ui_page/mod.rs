@@ -1,9 +1,9 @@
-//! Contains the traits and data structures to represent the UI pages of a client facing `Interface`
-//!
+//! Contains the data structure to represent the UI pages of a client facing `Interface`,
+//! namely `UIPage`.
+
 use std::fmt::Display;
 use std::thread;
 use std::time::Duration;
-use std::{print, println, panic, todo};
 use std::marker::Unpin;
 use std::io::{Stdout, stdout, stdin, Read as StdRead, Write as StdWrite};
 use async_std::{
@@ -91,9 +91,9 @@ impl UIPage {
                 Ok(UIPage::UsernamePage)
             },
             UIPage::UsernamePage => {
-                // println!("{}", "-".repeat(80));
                 match response {
                     Response::UsernameAlreadyExists { username} => {
+                        // Write feedback to client
                         write!(
                             out, "{}{}{}{}{}",
                             cursor::Goto(1, 2), clear::CurrentLine,
@@ -103,26 +103,9 @@ impl UIPage {
                         ).map_err(|e| UserError::WriteError(e))?;
                         out.flush().map_err(|e| UserError::WriteError(e))?;
 
-                        // Ensure thread sleeps so that client get read feedback before UI updates
-                        // task::spawn_blocking(|| {
-                        //     thread::sleep(Duration::from_millis(2500));
-                        // }).await;
-
-                        // println!("Sorry, but '{}' is already taken", username);
                         Ok(UIPage::UsernamePage)
                     }
                     Response::UsernameOk { username, lobby_state} => {
-                        // Inform client chosen username is ok
-                        // write!(
-                        //     out, "{}{}{}{}{}",
-                        //     cursor::Goto(1, 2), clear::CurrentLine,
-                        //     color::Fg(color::Rgb(215, 247, 241)),
-                        //     format!("Welcome {}", username),
-                        //     color::Fg(color::Reset)
-                        // ).map_err(|e| UserError::WriteError(e))?;
-                        // out.flush().map_err(|e| UserError::WriteError(e))?;
-                        // println!("Welcome {}", username);
-
                         // Parse the lobby state
                         let mut chatroom_frames = ChatroomFrames::try_from(lobby_state)
                             .map_err(|e| UserError::ParseLobby(e))?;
@@ -137,10 +120,8 @@ impl UIPage {
                 }
             },
             UIPage::LobbyPage {username, lobby_state} => {
-                // println!("{}", "-".repeat(80));
                 match response {
                     Response::ExitLobby => {
-                        // println!("Goodbye {}", username);
                         // Goodbye message
                         write!(out, "{}{}", clear::BeforeCursor, clear::AfterCursor).map_err(|e| UserError::WriteError(e))?;
                         out.flush().map_err(|e| UserError::WriteError(e))?;
@@ -165,21 +146,14 @@ impl UIPage {
                         let confirmation_response = Response::try_parse(&mut from_server)
                             .await
                             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
+
                         // We need to ensure that we receive Response::ReadSync variant, this should be the only
                         // response that the client receives during this state
                         if !confirmation_response.is_read_sync() {
                             return Err(UserError::InternalServerError("an internal server error occurred"));
                         }
                         // Display message to client they have successfully connected to the chatroom
-                        write!(
-                            out, "{}{}{}{}{}\n",
-                            cursor::Goto(1, 1), clear::All,
-                            color::Fg(color::Cyan), format!("You have successfully subscribed to {}", chatroom_name),
-                            color::Fg(color::Reset)
-                        ).map_err(|e| UserError::WriteError(e))?;
-                        out.flush().map_err(|e| UserError::WriteError(e))?;
 
-                        // println!("You have successfully connected to {}", chatroom_name);
                         // Chatroom page signals that chatroom procedure needs to be started
                         Ok(UIPage::Chatroom { username, chatroom_name})
                     }
@@ -195,15 +169,7 @@ impl UIPage {
                         if !confirmation_response.is_read_sync() {
                             return Err(UserError::InternalServerError("an internal server error occurred"));
                         }
-                        // Display message to client they have successfully connected to the chatroom
-                        // write!(
-                        //     out, "{}{}{}{}{}",
-                        //     cursor::Goto(1, 1), clear::All,
-                        //     color::Fg(color::Cyan), format!("You have successfully created chatroom {}", chatroom_name),
-                        //     color::Fg(color::Reset)
-                        // ).map_err(|e| UserError::WriteError(e))?;
-                        // out.flush().map_err(|e| UserError::WriteError(e))?;
-                        // println!("You have successfully created the chatroom {}", chatroom_name);
+
                         // Chatroom page signals that chatroom procedure needs to be started
                         Ok(UIPage::Chatroom { username, chatroom_name})
                     }
@@ -215,28 +181,10 @@ impl UIPage {
                             .map_err(|_| UserError::InternalServerError("connection to chatroom failed"))?;
                          match confirmation_response {
                             Response::ChatroomCreated {chatroom_name} => {
-                                // Display message to client they have successfully connected to the chatroom
-                                // write!(
-                                //     out, "{}{}{}{}{}{}",
-                                //     cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
-                                //     color::Fg(color::Cyan), format!("You have successfully created chatroom {}", chatroom_name),
-                                //     color::Fg(color::Reset)
-                                // ).map_err(|e| UserError::WriteError(e))?;
-                                // out.flush().map_err(|e| UserError::WriteError(e))?;
-                                // println!("You have successfully created the chatroom {}", chatroom_name);
                                 // Chatroom page signals that chatroom procedure needs to be started
                                 Ok(UIPage::Chatroom { username, chatroom_name})
                             },
                             Response::Subscribed {chatroom_name} => {
-                                // Display message to client they have successfully connected to the chatroom
-                                // write!(
-                                //     out, "{}{}{}{}{}{}",
-                                //     cursor::Goto(1, 1), clear::BeforeCursor, clear::AfterCursor,
-                                //     color::Fg(color::Cyan), format!("You have successfully subscribed to {}", chatroom_name),
-                                //     color::Fg(color::Reset)
-                                // ).map_err(|e| UserError::WriteError(e))?;
-                                // out.flush().map_err(|e| UserError::WriteError(e))?;
-                                // println!("You have successfully connected to {}", chatroom_name);
                                 // Chatroom page signals that chatroom procedure needs to be started
                                 Ok(UIPage::Chatroom { username, chatroom_name})
                             },
