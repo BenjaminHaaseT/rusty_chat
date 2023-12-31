@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read as StdRead;
 use tracing::{instrument, info, error, debug};
 use tracing_subscriber;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use async_std::io::{Read, ReadExt, Write, WriteExt};
 use async_std::channel::{self, Sender, Receiver};
 use async_std::net::ToSocketAddrs;
@@ -29,7 +31,7 @@ mod server_error;
 /// incoming client connections and spawns them onto new tasks for handling connections.
 #[instrument(ret, err)]
 async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_buf_size: usize) -> Result<(), ServerError> {
-    info!(server_addrs = ?server_addrs, channel_buf_size, "Listening at {:?}...", server_addrs);
+    info!("Listening at {:?}...", server_addrs);
     // Connect the supplied address
     let mut listener = TcpListener::bind(server_addrs.clone())
         .await
@@ -982,6 +984,19 @@ async fn chatroom_broker(
 
 
 fn main() {
+    let format = tracing_subscriber::fmt::layer()
+        .with_line_number(true)
+        .with_level(true)
+        .with_file(true)
+        .with_target(true)
+        .with_thread_ids(true);
+
+    let filter = tracing_subscriber::EnvFilter::from_default_env();
+
+    tracing_subscriber::registry()
+        .with(format)
+        .with(filter)
+        .init();
     let address = "0.0.0.0";
     let port = 8080;
     let res = task::block_on(accept_loop((address, port), 10_000));
