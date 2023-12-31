@@ -42,7 +42,6 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
 
     // Listen for incoming client connections
     while let Some(stream) = listener.incoming().next().await {
-        // TODO: log error in this case do not return
         let stream_res = stream.map_err(|e| ServerError::ConnectionFailed(format!("accept loop received an error: {:?}", e)));
         match stream_res {
             Ok(stream) => {
@@ -215,6 +214,7 @@ async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: Tcp
 /// the main broker task, 'chatroom_broker_receiver' for receiving 'Response's from a chatroom sub-broker
 /// task and 'shutdown' a channel used exclusively for signalling graceful shutdown with this client's
 /// read task.
+#[instrument(ret, err, skip(client_stream, main_broker_receiver, chatroom_broker_receiver, shutdown))]
 async fn client_write_loop(
     client_id: Uuid,
     client_stream: Arc<TcpStream>,
@@ -222,7 +222,7 @@ async fn client_write_loop(
     chatroom_broker_receiver: &mut AsyncStdReceiver<(TokioBroadcastReceiver<Response>, Response)>,
     shutdown: AsyncStdReceiver<Null>,
 ) -> Result<(), ServerError> {
-    // println!("inside client write loop");
+    debug!(peer_id = ?client_id, "Inside client_write_loop task for client {}", client_id);
     // Shadow client stream so it can be written to
     let mut client_stream = &*client_stream;
 
@@ -243,7 +243,8 @@ async fn client_write_loop(
         let response: Response = select! {
             // Check for a disconnection event
             null = shutdown.next().fuse() => {
-                println!("Client {} write loop shutting down", client_id);
+                // println!("Client {} write loop shutting down", client_id);
+                info!(peer_id = ?client_id, "Client {} write task shutting down", client_id);
                 match null {
                     Some(null) => match null {},
                     _ => {
@@ -252,6 +253,7 @@ async fn client_write_loop(
                         client_stream.write_all(&Response::ExitLobby.as_bytes())
                             .await
                             .map_err(|_| ServerError::ChannelSendError(format!("client write task {} unable to send 'ExitLobby' response during task shutdown", client_id)))?;
+                        debug!(peer_id = ?client_id, "Client {} write task wrote `ExitLobby` response to client's stream", client_id);
                         break;
                     }
                 }
@@ -259,10 +261,12 @@ async fn client_write_loop(
 
             // Check for a response from main broker
             resp = main_broker_receiver.next().fuse() => {
+                debug!(peer_id = ?client_id, "Client {} received response from main broker", client_id);
                 match resp {
                     Some(resp) => {
                         // Check if client is exiting from a chatroom
                         if resp.is_exit_chatroom() {
+                            info!(peer_id = ?client_id, "Client {} write task received `ExitChatroom` response", client_id);
                             // Create new dummy channel to replace old chatroom_broker channel
                             let (new_dummy_chat_sender, new_chat_receiver) = broadcast::channel::<Response>(100);
                             // Reset the chat_receiver channel
@@ -272,30 +276,20 @@ async fn client_write_loop(
                         // forward response sent from main broker so it can be written back to the client
                         resp
                     },
-                    None => {
-                        eprintln!("received none from main broker receiver");
-                        return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received 'None' from 'main_broker_receiver'", client_id)));
-                    }
+                    None => return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received 'None' from 'main_broker_receiver'", client_id)))
                 }
             }
 
             // Check for a new chatroom broker receiver
             subscription = chatroom_broker_receiver.next().fuse() => {
-                println!("attempting to subscribe to chatroom");
+                info!(peer_id = ?client_id, "Client {} write task attempting to subscribe to new chatroom", client_id);
                 match subscription {
                     Some(sub) => {
                         let (new_chat_receiver, resp) = sub;
-                        // assert that resp is the Subscribed or ChatroomCreated variant
-                        // it is a panic condition if the response sent on this channel from the
-                        // main broker is neither of these variants
-
-                        // assert!(
-                        //     resp.is_subscribed() || resp.is_chatroom_created(),
-                        //     "received invalid response from main chatroom broker on 'chatroom_broker_receiver'"
-                        // );
-
-                        // Ensure we received a valid response
+                        // Ensure that resp is the Subscribed or ChatroomCreated variant,
+                        // otherwise we need to return early with an error
                         if resp.is_subscribed() || resp.is_chatroom_created() {
+                            debug!(peer_id = ?client_id, "Client {} write task received valid subscription/created response from `chatroom_broker_receiver`", client_id);
                             // Update chat_receiver so client can receive new messages from chatroom
                             chat_receiver = BroadcastStream::new(new_chat_receiver).fuse();
                             // Forward response so it can be written to clients stream
@@ -304,15 +298,13 @@ async fn client_write_loop(
                             return Err(ServerError::IllegalResponse(format!("client {} received a {:?} response on 'chatroom_broker_receiver'", client_id, resp)));
                         }
                     },
-                    None => {
-                        eprintln!("received None from chatroom_broker_receiver");
-                        return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received 'None' from 'chatroom_broker_receiver'", client_id)));
-                    }
+                    None => return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received 'None' from 'chatroom_broker_receiver'", client_id))),
                 }
             },
 
             // Check for a response from the chatroom broker
             resp = chat_receiver.next().fuse() => {
+                debug!(peer_id = ?client_id, "Client {} received a response from `chat_receiver`", client_id);
                 match resp {
                     Some(msg_resp) => {
                         let msg_resp = if let Ok(r) = msg_resp {
@@ -328,10 +320,7 @@ async fn client_write_loop(
                             _ => return Err(ServerError::IllegalResponse(format!("client {} write task received {:?} response from chatroom broker", client_id, msg_resp))),
                         }
                     },
-                    None => {
-                        eprintln!("received None from chatroom_broker_receiver");
-                        return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received an 'None' from 'chat_receiver'", client_id)));
-                    }
+                    None => return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received an 'None' from 'chat_receiver'", client_id))),
                 }
             }
         };
@@ -340,6 +329,7 @@ async fn client_write_loop(
         client_stream.write_all(response.as_bytes().as_slice())
             .await
             .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to write response to stream", client_id)))?;
+        debug!(peer_id = ?client_id, "Client {} write task successfully wrote response to stream", client_id);
     }
 
     Ok(())
