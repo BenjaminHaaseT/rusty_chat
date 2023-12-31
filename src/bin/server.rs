@@ -923,6 +923,7 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
 /// that a client has exited its chatroom
 /// 'broadcast_sender' A broadcast channel so that any client write task that has subscribed can receive messages
 /// 'shutdown_receiver' A channel for receiving shutdown signals from the main broker
+#[instrument(ret, err, skip(events, client_exit, broadcast_sender, shutdown_receiver), fields(message = "Chatroom sub-broker task started"))]
 async fn chatroom_broker(
     id: Uuid,
     events: &mut AsyncStdReceiver<Event>,
@@ -938,21 +939,31 @@ async fn chatroom_broker(
     loop {
         let response = select! {
             event = events.select_next_some().fuse() => {
+                info!(chatroom_id = ?id, event = ?event, "Received event");
                 match event {
                     Event::Quit { peer_id } => {
+                        info!(peer_id = ?peer_id, chatroom_id = ?id, "Client {} exiting chatroom {}", peer_id, id);
                         client_exit.send(Event::Quit { peer_id })
                         .await
                         .map_err(|_| ServerError::ChannelSendError(format!("chatroom-sub-broker {} unable to send quit event to main broker", id)))?;
+                        info!(peer_id = ?peer_id, chatroom_id = ?id, "Successfully sent `Quit` event to main broker");
                         continue;
                     }
-                    Event::Message { message, peer_id} => Response::Message {peer_id, msg: message},
+                    Event::Message { message, peer_id} => {
+                        debug!(peer_id = ?peer_id, chatroom_id = ?id, "Received message from {}", peer_id);
+                        Response::Message {peer_id, msg: message}
+                    },
                     _ => return Err(ServerError::IllegalEvent(format!("received illegal event, should only receive message and quit events"))),
                 }
             },
             shutdown = shutdown_receiver.next().fuse() => {
+                info!(chatroom_id = ?id, "Received shutdown signal");
                 match shutdown {
                     Some(null) => match null {}
-                    None => break,
+                    None => {
+                        info!(chatroom_id = ?id, "Shutting down");
+                        break;
+                    },
                 }
             }
         };
@@ -961,11 +972,7 @@ async fn chatroom_broker(
         broadcast_sender
             .send(response)
             .map_err(|_| ServerError::ChannelSendError(format!("chatroom-sub-broker {} unable to broadcast message", id)))?;
-        // let mut sender_clone = broadcast_sender.clone();
-        // task::spawn_blocking(move || {
-        //     sender_clone.send(response).map_err(|_| ServerError::ConnectionFailed)
-        // }).await?;
-
+        debug!(chatroom_id = ?id, "Message was successfully broadcast to subscribers");
     }
 
     Ok(())
