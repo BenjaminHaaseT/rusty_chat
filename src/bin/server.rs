@@ -62,9 +62,9 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
 /// Takes 'client_stream' for parsing events triggered by the client and
 /// for writing responses back to the client from the server. 'main_broker_sender' is used for sending
 /// events triggered by the client to the main broker task.
-#[instrument(ret, err, skip(main_broker_sender, client_stream))]
+#[instrument(ret, err, skip(main_broker_sender, client_stream), fields(peer_address = ?client_stream.peer_addr()), msg = "Handling connection for client")]
 async fn handle_connection(main_broker_sender: Sender<Event>, client_stream: TcpStream) -> Result<(), ServerError> {
-    debug!(peer_address = ?client_stream.peer_addr(), "Handling connection for client {:?}", client_stream.peer_addr());
+    // debug!(peer_address = ?client_stream.peer_addr(), "Handling connection for client {:?}", client_stream.peer_addr());
     // Move into an arc, so it can be shared between read/write tasks
     let client_stream = Arc::new(client_stream);
     // strictly for reading from the client
@@ -574,13 +574,6 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
         // Now attempt to parse event and send a response
         match event {
             Event::Quit {peer_id} => {
-                // let mut client = clients.get_mut(&peer_id)
-                //     .ok_or(ServerError::StateError(format!("client with id {} should exist in map", peer_id)))?;
-                // // Send quit response back to client
-                // client.main_broker_write_task_sender
-                //     .send(Response::ExitLobby)
-                //     .await
-                //     .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task 'ExitLobby' response", peer_id)))?;
                 info!(peer_id = ?peer_id, "Client {:?} has quit", peer_id);
             }
             Event::Lobby {peer_id} => {
@@ -927,7 +920,6 @@ async fn chatroom_broker(
     client_exit: &mut AsyncStdSender<Event>,
     broadcast_sender: &mut TokioBroadcastSender<Response>,
     shutdown_receiver: AsyncStdReceiver<Null>,
-    // disconnection_sender: AsyncStdSender<(Uuid, AsyncStdReceiver<Event>, TokioBroadcastSender<Response>)>
 ) -> Result<(), ServerError> {
     // Fuse receivers for select loop
     let mut events = events.fuse();
