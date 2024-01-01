@@ -7,14 +7,15 @@ use std::sync::Arc;
 use async_std::channel::{Sender as AsyncStdSender, Receiver as AsyncStdReceiver};
 use async_std::task;
 use async_std::channel;
-use tokio::sync::broadcast::{self, Sender as TokioBroadcastSender};
+use async_std::net::TcpStream;
+use tokio::sync::broadcast::{self, Sender as TokioBroadcastSender, Receiver as TokioBroadcastReceiver};
 use uuid::Uuid;
 use tracing::{info, error, debug, instrument};
 use rusty_chat::Chatroom;
 
 use crate::{Client, Event, Response, Null};
 use crate::ServerError;
-use super::{create_lobby_state, chatroom_broker};
+use super::{create_lobby_state, chatroom_broker, client_write_loop};
 
 
 pub mod prelude {
@@ -289,5 +290,72 @@ pub async fn handle_username_event(
             .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
         info!(peer_id = ?peer_id, username = ?new_username_arc, "Sent `UsernameOk` response to client {} write task", peer_id);
     }
+    Ok(())
+}
+
+pub async fn handle_new_client_event(
+    peer_id: Uuid,
+    stream: Arc<TcpStream>,
+    shutdown: AsyncStdReceiver<Null>,
+    chatroom_connection: AsyncStdSender<AsyncStdSender<Event>>,
+    clients: &mut HashMap<Uuid, Client>,
+    client_disconnection_sender: &AsyncStdSender<(Uuid, AsyncStdReceiver<Response>, AsyncStdReceiver<(TokioBroadcastReceiver<Response>, Response)>)>
+) -> Result<(), ServerError> {
+    info!(peer_id = ?peer_id, "Received `NewClient` event");
+    if clients.contains_key(&peer_id) {
+        return Err(ServerError::StateError(format!("when trying to create a new client with id {}, a client with id {} already exists", peer_id, peer_id)));
+    }
+
+    // Channel for main broker to client's write task
+    let (main_broker_write_task_sender, mut main_broker_write_task_receiver) = channel::unbounded::<Response>();
+
+    // Channel so client can receive new chatroom subscriptions
+    let (new_chatroom_connection_write_sender, mut new_chatroom_connection_write_receiver) = channel::unbounded::<(TokioBroadcastReceiver<Response>, Response)>();
+
+    // Clone the client disconnection receiver for harvesting disconnected clients
+    let mut client_disconnection_clone = client_disconnection_sender.clone();
+
+    // Create the new client
+    let client = Client {
+        id: peer_id,
+        username: None,
+        main_broker_write_task_sender,
+        new_chatroom_connection_read_sender: chatroom_connection,
+        new_chatroom_connection_write_sender,
+        chatroom_broker_id: None,
+    };
+
+    info!(peer_id = ?peer_id, "Spawning write task for client {}", peer_id);
+    // Spawn new client's write task
+    let _client_write_task = task::spawn(async move {
+        let res = client_write_loop(
+            peer_id,
+            stream,
+            &mut main_broker_write_task_receiver,
+            &mut new_chatroom_connection_write_receiver,
+            shutdown,
+        ).await;
+
+        client_disconnection_clone.send((peer_id, main_broker_write_task_receiver, new_chatroom_connection_write_receiver))
+            .await
+            .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send disconnection event to main broker", peer_id)))?;
+
+        match res {
+            Err(e) => {
+                error!(error = ?e, "Error returned from client write task");
+                Err(e)
+            },
+            Ok(()) => Ok(())
+        }
+    });
+
+    // Send client connection ok response to client's write task
+    info!(peer_id = ?peer_id, "Sending `ConnectionOk` response to client {}", peer_id);
+    client.main_broker_write_task_sender.send(Response::ConnectionOk)
+        .await
+        .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send 'ConnectionOk' response to new client with id {}", client.id)))?;
+
+    clients.insert(peer_id, client);
+    info!(peer_id = ?peer_id, "Client {} was successfully inserted into client map and`ConnectionOk` response successfully sent to write task", peer_id);
     Ok(())
 }
