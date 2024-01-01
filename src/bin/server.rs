@@ -845,63 +845,70 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 ).await?;
             }
             Event::NewClient {stream, shutdown, chatroom_connection, peer_id} => {
-                info!(peer_id = ?peer_id, "Received `NewClient` event");
-                if clients.contains_key(&peer_id) {
-                    return Err(ServerError::StateError(format!("when trying to create a new client with id {}, a client with id {} already exists", peer_id, peer_id)));
-                }
-
-                // Channel for main broker to client's write task
-                let (main_broker_write_task_sender, mut main_broker_write_task_receiver) = channel::unbounded::<Response>();
-
-                // Channel so client can receive new chatroom subscriptions
-                let (new_chatroom_connection_write_sender, mut new_chatroom_connection_write_receiver) = channel::unbounded::<(TokioBroadcastReceiver<Response>, Response)>();
-
-                // Clone the client disconnection receiver for harvesting disconnected clients
-                let mut client_disconnection_clone = client_disconnection_sender.clone();
-
-                // Create the new client
-                let client = Client {
-                    id: peer_id,
-                    username: None,
-                    main_broker_write_task_sender,
-                    new_chatroom_connection_read_sender: chatroom_connection,
-                    new_chatroom_connection_write_sender,
-                    chatroom_broker_id: None,
-                };
-
-                info!(peer_id = ?peer_id, "Spawning write task for client {}", peer_id);
-                // Spawn new client's write task
-                let _client_write_task = task::spawn(async move {
-                    let res = client_write_loop(
-                        peer_id,
-                        stream,
-                        &mut main_broker_write_task_receiver,
-                        &mut new_chatroom_connection_write_receiver,
-                        shutdown,
-                    ).await;
-
-                    client_disconnection_clone.send((peer_id, main_broker_write_task_receiver, new_chatroom_connection_write_receiver))
-                        .await
-                        .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send disconnection event to main broker", peer_id)))?;
-
-                    match res {
-                        Err(e) => {
-                            error!(error = ?e, "Error returned from client write task");
-                            Err(e)
-                        },
-                        Ok(()) => Ok(())
-                    }
-                });
-
-                // Send client connection ok response to client's write task
-                info!(peer_id = ?peer_id, "Sending `ConnectionOk` response to client {}", peer_id);
-                client.main_broker_write_task_sender.send(Response::ConnectionOk)
-                    .await
-                    .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send 'ConnectionOk' response to new client with id {}", client.id)))?;
-
-                clients.insert(peer_id, client);
-                info!(peer_id = ?peer_id, "Client {} was successfully inserted into client map and`ConnectionOk` response successfully sent to write task", peer_id);
-
+                // info!(peer_id = ?peer_id, "Received `NewClient` event");
+                // if clients.contains_key(&peer_id) {
+                //     return Err(ServerError::StateError(format!("when trying to create a new client with id {}, a client with id {} already exists", peer_id, peer_id)));
+                // }
+                //
+                // // Channel for main broker to client's write task
+                // let (main_broker_write_task_sender, mut main_broker_write_task_receiver) = channel::unbounded::<Response>();
+                //
+                // // Channel so client can receive new chatroom subscriptions
+                // let (new_chatroom_connection_write_sender, mut new_chatroom_connection_write_receiver) = channel::unbounded::<(TokioBroadcastReceiver<Response>, Response)>();
+                //
+                // // Clone the client disconnection receiver for harvesting disconnected clients
+                // let mut client_disconnection_clone = client_disconnection_sender.clone();
+                //
+                // // Create the new client
+                // let client = Client {
+                //     id: peer_id,
+                //     username: None,
+                //     main_broker_write_task_sender,
+                //     new_chatroom_connection_read_sender: chatroom_connection,
+                //     new_chatroom_connection_write_sender,
+                //     chatroom_broker_id: None,
+                // };
+                //
+                // info!(peer_id = ?peer_id, "Spawning write task for client {}", peer_id);
+                // // Spawn new client's write task
+                // let _client_write_task = task::spawn(async move {
+                //     let res = client_write_loop(
+                //         peer_id,
+                //         stream,
+                //         &mut main_broker_write_task_receiver,
+                //         &mut new_chatroom_connection_write_receiver,
+                //         shutdown,
+                //     ).await;
+                //
+                //     client_disconnection_clone.send((peer_id, main_broker_write_task_receiver, new_chatroom_connection_write_receiver))
+                //         .await
+                //         .map_err(|_| ServerError::ChannelSendError(format!("client {} unable to send disconnection event to main broker", peer_id)))?;
+                //
+                //     match res {
+                //         Err(e) => {
+                //             error!(error = ?e, "Error returned from client write task");
+                //             Err(e)
+                //         },
+                //         Ok(()) => Ok(())
+                //     }
+                // });
+                //
+                // // Send client connection ok response to client's write task
+                // info!(peer_id = ?peer_id, "Sending `ConnectionOk` response to client {}", peer_id);
+                // client.main_broker_write_task_sender.send(Response::ConnectionOk)
+                //     .await
+                //     .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send 'ConnectionOk' response to new client with id {}", client.id)))?;
+                //
+                // clients.insert(peer_id, client);
+                // info!(peer_id = ?peer_id, "Client {} was successfully inserted into client map and`ConnectionOk` response successfully sent to write task", peer_id);
+                handle_new_client_event(
+                    peer_id,
+                    stream,
+                    shutdown,
+                    chatroom_connection,
+                    &mut clients,
+                    &client_disconnection_sender
+                ).await?;
             }
             Event::Message {ref message, peer_id} => return Err(ServerError::IllegalEvent(format!("main broker received illegal event from client {}", peer_id))),
         }
