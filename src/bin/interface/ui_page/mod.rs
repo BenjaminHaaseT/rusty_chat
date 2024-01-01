@@ -474,23 +474,24 @@ impl UIPage {
                     color::Fg(color::Reset),
                 ).map_err(|e| UserError::WriteError(e))?;
                 out.flush().map_err(|e| UserError::WriteError(e))?;
-            } else if buf.len() > 1 && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
-                // Ensure the selected chatroom name exists in the current lobby state
-                write!(
-                    out, "{}{}{}{}{}",
-                    cursor::Goto(1, prompt_offset), clear::AfterCursor,
-                    color::Fg(color::Rgb(202, 227, 113)),
-                    format!("Chatroom {} does not exist.", buf),
-                    color::Fg(color::Reset),
-                ).map_err(|e| UserError::WriteError(e))?;
-                out.flush().map_err(|e| UserError::WriteError(e))?;
-            } else if buf.len() == 1 && buf != "q" && buf != "c" {
+            } else if buf.len() == 1 && buf != "q" && buf != "c" && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
                 // Ensure a valid command was entered
                 write!(
                     out, "{}{}{}{}{}",
                     cursor::Goto(1, prompt_offset), clear::AfterCursor,
                     color::Fg(color::Rgb(202, 227, 113)),
                     "Please select a valid option.",
+                    color::Fg(color::Reset),
+                ).map_err(|e| UserError::WriteError(e))?;
+                out.flush().map_err(|e| UserError::WriteError(e))?;
+            }
+            else if buf != "q" && buf != "c" && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
+                // Ensure the selected chatroom name exists in the current lobby state
+                write!(
+                    out, "{}{}{}{}{}",
+                    cursor::Goto(1, prompt_offset), clear::AfterCursor,
+                    color::Fg(color::Rgb(202, 227, 113)),
+                    format!("Chatroom {} does not exist.", buf),
                     color::Fg(color::Reset),
                 ).map_err(|e| UserError::WriteError(e))?;
                 out.flush().map_err(|e| UserError::WriteError(e))?;
@@ -541,14 +542,22 @@ impl UIPage {
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         out.flush().map_err(|e| UserError::WriteError(e))?;
-
-                        // println!("chatroom name cannot be empty, please enter valid input.");
                     } else if buf.as_bytes().len() > 255 {
                         write!(
                             out, "{}{}{}{}{}",
                             cursor::Goto(1, prompt_offset), clear::AfterCursor,
                             color::Fg(color::Rgb(202, 227, 113)),
                             "chatroom name length cannot exceed 255 bytes, please enter a valid chatroom name",
+                            color::Fg(color::Reset)
+                        ).map_err(|e| UserError::WriteError(e))?;
+                        out.flush().map_err(|e| UserError::WriteError(e))?;
+                    } else if buf == "q" || buf == "c" {
+                        // Inform user chatroom name cannot be a reserved command
+                        write!(
+                            out, "{}{}{}{}{}",
+                            cursor::Goto(1, prompt_offset), clear::AfterCursor,
+                            color::Fg(color::Rgb(202, 227, 113)),
+                            "chatroom name cannot be a reserved command",
                             color::Fg(color::Reset)
                         ).map_err(|e| UserError::WriteError(e))?;
                         out.flush().map_err(|e| UserError::WriteError(e))?;

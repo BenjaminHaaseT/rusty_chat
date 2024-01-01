@@ -52,11 +52,6 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
             }
             Err(e) => error!(error = ?e)
         }
-        // println!("accepting client connection: {:?}", stream.peer_addr());
-        // task::spawn(handle_connection(broker_sender.clone(), stream));
-        // if let Err(e) = stream.map_err(|e| ServerError::ConnectionFailed(format!("accept loop received an error: {:?}", e))) {
-        //     error!(e);
-        // }
     }
 
     Ok(())
