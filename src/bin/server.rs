@@ -798,44 +798,51 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 ).await?;
             }
             Event::Username { peer_id, new_username} => {
-                info!(peer_id = ?peer_id, "Client {} has requested `Username`", peer_id);
-                // Get client from map
-                let mut client = clients.get_mut(&peer_id)
-                    .ok_or(ServerError::StateError(format!("client with id {} should exist in client map", peer_id)))?;
-
-                // Ensure username for the current client is not set
-                if client.username.is_some() {
-                    return Err(ServerError::IllegalEvent(format!("client with id {} requested to change username while already having username set", peer_id)));
-                }
-                // Ensure client is not inside an existing chatroom
-                if client.chatroom_broker_id.is_some() {
-                    return Err(ServerError::IllegalEvent(format!("client with id {} request to change username while inside an existing chatroom", peer_id)));
-                }
-
-                if client_usernames.contains(&new_username) {
-                    info!(peer_id = ?peer_id, username = ?new_username, "Client {} chosen username already taken", peer_id);
-                    let response = Response::UsernameAlreadyExists { username: new_username };
-                    client.main_broker_write_task_sender
-                        .send(response)
-                        .await
-                        .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
-                } else {
-                    // Create an arc of username for multiple references
-                    let new_username_arc = Arc::new(new_username.clone());
-                    // Update state of username set
-                    client_usernames.insert(new_username_arc.clone());
-                    // Update state of client
-                    client.username = Some(new_username_arc.clone());
-                    // Create lobby_state and response
-                    let lobby_state = create_lobby_state(&chatroom_brokers);
-                    let response = Response::UsernameOk {username: new_username, lobby_state};
-                    // Send response to client
-                    client.main_broker_write_task_sender
-                        .send(response)
-                        .await
-                        .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
-                    info!(peer_id = ?peer_id, username = ?new_username_arc, "Sent `UsernameOk` response to client {} write task", peer_id);
-                }
+                // info!(peer_id = ?peer_id, "Client {} has requested `Username`", peer_id);
+                // // Get client from map
+                // let mut client = clients.get_mut(&peer_id)
+                //     .ok_or(ServerError::StateError(format!("client with id {} should exist in client map", peer_id)))?;
+                //
+                // // Ensure username for the current client is not set
+                // if client.username.is_some() {
+                //     return Err(ServerError::IllegalEvent(format!("client with id {} requested to change username while already having username set", peer_id)));
+                // }
+                // // Ensure client is not inside an existing chatroom
+                // if client.chatroom_broker_id.is_some() {
+                //     return Err(ServerError::IllegalEvent(format!("client with id {} request to change username while inside an existing chatroom", peer_id)));
+                // }
+                //
+                // if client_usernames.contains(&new_username) {
+                //     info!(peer_id = ?peer_id, username = ?new_username, "Client {} chosen username already taken", peer_id);
+                //     let response = Response::UsernameAlreadyExists { username: new_username };
+                //     client.main_broker_write_task_sender
+                //         .send(response)
+                //         .await
+                //         .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
+                // } else {
+                //     // Create an arc of username for multiple references
+                //     let new_username_arc = Arc::new(new_username.clone());
+                //     // Update state of username set
+                //     client_usernames.insert(new_username_arc.clone());
+                //     // Update state of client
+                //     client.username = Some(new_username_arc.clone());
+                //     // Create lobby_state and response
+                //     let lobby_state = create_lobby_state(&chatroom_brokers);
+                //     let response = Response::UsernameOk {username: new_username, lobby_state};
+                //     // Send response to client
+                //     client.main_broker_write_task_sender
+                //         .send(response)
+                //         .await
+                //         .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
+                //     info!(peer_id = ?peer_id, username = ?new_username_arc, "Sent `UsernameOk` response to client {} write task", peer_id);
+                // }
+                handle_username_event(
+                    peer_id,
+                    new_username,
+                    &mut clients,
+                    &mut client_usernames,
+                    &mut chatroom_brokers
+                ).await?;
             }
             Event::NewClient {stream, shutdown, chatroom_connection, peer_id} => {
                 info!(peer_id = ?peer_id, "Received `NewClient` event");
