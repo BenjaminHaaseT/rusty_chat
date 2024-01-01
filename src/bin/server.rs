@@ -722,73 +722,80 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                 ).await?;
             }
             Event::Join {peer_id, chatroom_name} => {
-                info!(peer_id = ?peer_id, chatroom_name, "Client {} has requested to join chatroom {}", peer_id, chatroom_name);
-                let mut client = clients.
-                    get_mut(&peer_id)
-                    .ok_or(ServerError::StateError(format!("client with id {} not contained in map", peer_id)))?;
-
-                // Ensure same invariants for Event::Create handler also hold i.e.
-                // client has set username and does not have broker id set
-                if client.username.is_none() {
-                    return Err(ServerError::IllegalEvent(format!("client with id {} attempted to join a chatroom without having username set", peer_id)));
-                }
-                if client.chatroom_broker_id.is_some() {
-                    return Err(ServerError::IllegalEvent(format!("client with id {} attempted to join a chatroom while already inside a chatroom", peer_id)));
-                }
-
-                // Check that a chatroom with this name exists
-                if let Some(chatroom_id) = chatroom_name_to_id.get(&chatroom_name) {
-                    // We need a shared reference here since we may need to take another shared
-                    // reference from chatroom_brokers
-                    let chatroom = chatroom_brokers
-                        .get(&chatroom_id)
-                        .ok_or(ServerError::StateError(format!("chatroom with id {} and name {} should exist in chatroom map", chatroom_id, chatroom_name)))?;
-
-                    if chatroom.capacity == chatroom.num_clients {
-                        info!(peer_id = ?peer_id, chatroom_id = ?chatroom_id, chatroom_name, "Client {} unable to join chatroom, chatroom is full", peer_id);
-                        let lobby_state = create_lobby_state(&chatroom_brokers);
-                        let response = Response::ChatroomFull {chatroom_name, lobby_state};
-                        client.main_broker_write_task_sender.send(response)
-                            .await
-                            .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
-                    } else {
-                        debug!("Client {} may join chatroom", peer_id);
-                        // Get mutable reference here to update state of chatroom
-                        let mut chatroom = chatroom_brokers
-                            .get_mut(&chatroom_id)
-                            .ok_or(ServerError::StateError(format!("chatroom with id {} and name {} should exist in chatroom map", chatroom_id, chatroom_name)))?;
-
-                        chatroom.num_clients += 1;
-
-                        // For sending to client's write/read tasks respectively
-                        let chatroom_subscriber = chatroom.client_subscriber.subscribe();
-                        let chatroom_sender = chatroom.client_read_sender.clone();
-
-                        // Update state of client
-                        debug!(peer_id = ?peer_id, "Setting chatroom_broker_id for client {}", peer_id);
-                        client.chatroom_broker_id = Some(*chatroom_id);
-
-                        // Send response to client's read task first
-                        client.new_chatroom_connection_read_sender
-                            .send(chatroom_sender)
-                            .await
-                            .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} handle connection task a response", peer_id)))?;
-
-                        // Send subscriber, response to client's write task
-                        let response = Response::Subscribed {chatroom_name};
-                        client.new_chatroom_connection_write_sender
-                            .send((chatroom_subscriber, response))
-                            .await
-                            .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
-                    }
-                } else {
-                    info!(peer_id = ?peer_id, chatroom_name, "Client {} unable to join chatroom, chatroom does not exist", peer_id);
-                    let lobby_state = create_lobby_state(&chatroom_brokers);
-                    let response = Response::ChatroomDoesNotExist {chatroom_name, lobby_state};
-                    client.main_broker_write_task_sender.send(response)
-                        .await
-                        .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
-                }
+                // info!(peer_id = ?peer_id, chatroom_name, "Client {} has requested to join chatroom {}", peer_id, chatroom_name);
+                // let mut client = clients.
+                //     get_mut(&peer_id)
+                //     .ok_or(ServerError::StateError(format!("client with id {} not contained in map", peer_id)))?;
+                //
+                // // Ensure same invariants for Event::Create handler also hold i.e.
+                // // client has set username and does not have broker id set
+                // if client.username.is_none() {
+                //     return Err(ServerError::IllegalEvent(format!("client with id {} attempted to join a chatroom without having username set", peer_id)));
+                // }
+                // if client.chatroom_broker_id.is_some() {
+                //     return Err(ServerError::IllegalEvent(format!("client with id {} attempted to join a chatroom while already inside a chatroom", peer_id)));
+                // }
+                //
+                // // Check that a chatroom with this name exists
+                // if let Some(chatroom_id) = chatroom_name_to_id.get(&chatroom_name) {
+                //     // We need a shared reference here since we may need to take another shared
+                //     // reference from chatroom_brokers
+                //     let chatroom = chatroom_brokers
+                //         .get(&chatroom_id)
+                //         .ok_or(ServerError::StateError(format!("chatroom with id {} and name {} should exist in chatroom map", chatroom_id, chatroom_name)))?;
+                //
+                //     if chatroom.capacity == chatroom.num_clients {
+                //         info!(peer_id = ?peer_id, chatroom_id = ?chatroom_id, chatroom_name, "Client {} unable to join chatroom, chatroom is full", peer_id);
+                //         let lobby_state = create_lobby_state(&chatroom_brokers);
+                //         let response = Response::ChatroomFull {chatroom_name, lobby_state};
+                //         client.main_broker_write_task_sender.send(response)
+                //             .await
+                //             .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
+                //     } else {
+                //         debug!("Client {} may join chatroom", peer_id);
+                //         // Get mutable reference here to update state of chatroom
+                //         let mut chatroom = chatroom_brokers
+                //             .get_mut(&chatroom_id)
+                //             .ok_or(ServerError::StateError(format!("chatroom with id {} and name {} should exist in chatroom map", chatroom_id, chatroom_name)))?;
+                //
+                //         chatroom.num_clients += 1;
+                //
+                //         // For sending to client's write/read tasks respectively
+                //         let chatroom_subscriber = chatroom.client_subscriber.subscribe();
+                //         let chatroom_sender = chatroom.client_read_sender.clone();
+                //
+                //         // Update state of client
+                //         debug!(peer_id = ?peer_id, "Setting chatroom_broker_id for client {}", peer_id);
+                //         client.chatroom_broker_id = Some(*chatroom_id);
+                //
+                //         // Send response to client's read task first
+                //         client.new_chatroom_connection_read_sender
+                //             .send(chatroom_sender)
+                //             .await
+                //             .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} handle connection task a response", peer_id)))?;
+                //
+                //         // Send subscriber, response to client's write task
+                //         let response = Response::Subscribed {chatroom_name};
+                //         client.new_chatroom_connection_write_sender
+                //             .send((chatroom_subscriber, response))
+                //             .await
+                //             .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
+                //     }
+                // } else {
+                //     info!(peer_id = ?peer_id, chatroom_name, "Client {} unable to join chatroom, chatroom does not exist", peer_id);
+                //     let lobby_state = create_lobby_state(&chatroom_brokers);
+                //     let response = Response::ChatroomDoesNotExist {chatroom_name, lobby_state};
+                //     client.main_broker_write_task_sender.send(response)
+                //         .await
+                //         .map_err(|_| ServerError::ChannelSendError(format!("main broker unable to send client {} write task a response", peer_id)))?;
+                // }
+                handle_join_event(
+                    peer_id,
+                    chatroom_name,
+                    &mut clients,
+                    &mut chatroom_brokers,
+                    &mut chatroom_name_to_id,
+                ).await?;
             }
             Event::Username { peer_id, new_username} => {
                 info!(peer_id = ?peer_id, "Client {} has requested `Username`", peer_id);
