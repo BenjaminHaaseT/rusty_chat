@@ -725,7 +725,7 @@ struct CLI {
     /// The tcp port for the server
     #[arg(short = 'p')]
     port: u16,
-    /// The size of the channel buffer
+    /// The size of the channel buffer for any channel that has a bounded buffer size
     #[arg(short = 'b')]
     channel_buf_size: usize,
 }
