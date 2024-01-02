@@ -1,6 +1,8 @@
 use std::fmt::{Display, Formatter};
 use std::error::Error;
 use async_std::task;
+use tracing_appender;
+use tracing_subscriber::fmt::MakeWriter;
 
 mod interface;
 use interface::prelude::*;
@@ -39,6 +41,11 @@ impl Display for UserError {
 impl Error for UserError {}
 
 fn main() {
+    let appender = tracing_appender::rolling::never("/Users/benjaminhaase/development/Personal/rusty_chat/src", "client.log");
+    let (subscriber_writer, _guard) = tracing_appender::non_blocking(appender);
+    tracing_subscriber::fmt()
+        .with_writer(subscriber_writer)
+        .init();
     let server_address = "0.0.0.0";
     let server_port = 8080;
     let res = task::block_on(Interface::run((server_address, server_port)));
