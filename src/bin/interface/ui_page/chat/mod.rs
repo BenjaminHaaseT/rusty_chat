@@ -18,6 +18,11 @@ pub mod prelude {
 
 pub enum Null {}
 
+/// Helper function for `chat_window_task`, manages collecting input tokens from the standard input
+/// and sending complete messages back to `chat_window_task`.
+///
+/// Intended to spawned on a separate thread since there blocking operations performed on during
+/// this task. These blocking operations are intentional which is why a new thread is needed.
 #[instrument(ret, err, skip_all)]
 async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) -> Result<(), UserError> {
     // Get asynchronous stream of key events
@@ -78,6 +83,9 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
     Ok(())
 }
 
+/// In charge to the chatroom user interface.
+/// Displays a new chatroom interface to the client on standard out, receives messages from both the
+/// server the client is connected to as well as the client itself and displays messages to the client.
 #[instrument(ret, err, skip(from_server, to_server))]
 pub async fn chat_window_task<'a, R, W>(username: &'a str, chatroom_name: &'a str, from_server: R, to_server: W) -> Result<(), UserError>
 where
