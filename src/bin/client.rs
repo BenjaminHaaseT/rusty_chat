@@ -57,8 +57,6 @@ fn main() {
     tracing_subscriber::fmt()
         .with_writer(subscriber_writer)
         .init();
-    // let server_address = "0.0.0.0";
-    // let server_port = 8080;
     let cli = CLI::parse();
     let res = task::block_on(Interface::run((cli.address.as_str(), cli.port)));
     if let Err(e) = res {

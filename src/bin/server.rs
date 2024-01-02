@@ -705,8 +705,6 @@ async fn chatroom_broker(
                 }
             }
         };
-
-        // TODO: task may block, maybe use a different approach, repeated clones may be expensive
         broadcast_sender
             .send(response)
             .map_err(|_| ServerError::ChannelSendError(format!("chatroom-sub-broker {} unable to broadcast message", id)))?;
@@ -746,8 +744,6 @@ fn main() {
         .init();
     let cli = CLI::parse();
 
-    // let address = "0.0.0.0";
-    // let port = 8080;
     let res = task::block_on(accept_loop((cli.address.as_str(), cli.port), cli.channel_buf_size));
     if let Err(e) = res {
         eprintln!("error from main: {e}");
