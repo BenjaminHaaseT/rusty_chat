@@ -58,7 +58,7 @@ impl Interface {
                 break;
             }
             // Attempt to read client input and send a request to the server
-            ui.process_request(&mut stdout, &mut from_client, to_server, from_server).await?;
+            ui.process_request(&mut stdout, to_server, from_server).await?;
         }
         info!("Exit from chatroom server successful");
         write!(stdout, "\n\r{}", cursor::Show).map_err(|e| UserError::WriteError(e))?;
