@@ -598,6 +598,7 @@ impl UIPage {
     }
 
     /// Helper method for 'process_request'. Starts the chatroom procedure.
+    #[instrument(ret, err, skip(out, to_server, from_server))]
     async fn chatroom_process_request_helper<R, W>(
         username: &String,
         chatroom_name: &String,
@@ -628,6 +629,7 @@ impl UIPage {
 
     /// Helper method for 'process_request'. Attempts to send a request to the server
     /// for refreshing the lobby
+    #[instrument(ret, err, skip_all)]
     async fn quit_chatroom_process_request_helper<W>(mut to_server: W) -> Result<(), UserError>
     where
         W: WriteExt + Unpin
