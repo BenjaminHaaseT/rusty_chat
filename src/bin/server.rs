@@ -42,7 +42,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
     let (broker_sender, broker_receiver) = channel::bounded::<Event>(channel_buf_size);
 
     // spawn broker task
-    let _broker_handle = task::spawn(broker(broker_receiver));
+    let broker_handle = task::spawn(broker(broker_receiver));
 
     // Listen for incoming client connections
     while let Some(stream) = listener.incoming().next().await {
@@ -55,7 +55,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
             Err(e) => error!(error = ?e)
         }
     }
-
+    broker_handle.await?;
     Ok(())
 }
 

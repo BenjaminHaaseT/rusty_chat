@@ -452,7 +452,7 @@ impl UIPage {
             write!(
                 out, "{}{}{}{}{}",
                 cursor::Goto(1, prompt_offset + 1), clear::CurrentLine,
-                color::Fg(color::Rgb(116, 179, 252)),
+                color::Fg(color::Rgb(215, 247, 241)),
                 "[q] quit | [c] create new chatroom | [:name:] join existing chatroom",
                 color::Fg(color::Reset)
             ).map_err(|e| UserError::WriteError(e))?;
