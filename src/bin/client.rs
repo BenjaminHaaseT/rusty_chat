@@ -38,8 +38,6 @@ impl Display for UserError {
 
 impl Error for UserError {}
 
-
-
 fn main() {
     let server_address = "0.0.0.0";
     let server_port = 8080;
