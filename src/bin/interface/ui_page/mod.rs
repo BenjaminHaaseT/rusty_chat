@@ -654,6 +654,7 @@ impl UIPage {
 
 /// Helper function for reading client input from stdin while using 'IntoRawMode' trait with
 /// out.
+#[instrument(ret, err, skip(out))]
 fn read_line_from_client_input(out: &mut RawTerminal<Stdout>, row: u16, col: u16) -> Result<String, UserError> {
     let mut keys = stdin().keys();
     let mut buf = String::new();

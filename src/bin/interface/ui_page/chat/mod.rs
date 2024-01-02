@@ -3,19 +3,20 @@ use std::marker::Unpin;
 use std::thread;
 use std::collections::VecDeque;
 use async_std::{
-    channel::{Sender, Receiver, unbounded},
+    channel::{Sender, unbounded},
     io::{WriteExt, ReadExt},
     task,
 };
 use futures::{Future, FutureExt, Stream, StreamExt, select, stream};
 use termion::{clear, cursor, style, color, input::TermRead, event::Key, raw::IntoRawMode};
-use tracing::{instrument, error, debug, info};
+use tracing::{instrument, info};
 use crate::UserError;
 use rusty_chat::prelude::*;
 pub mod prelude {
     pub use super::*;
 }
 
+/// An empty enum, intended to be used as a synchronizing signal when asynchronous tasks are coordinating shutdown.
 pub enum Null {}
 
 /// Helper function for `chat_window_task`, manages collecting input tokens from the standard input
