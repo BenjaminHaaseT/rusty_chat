@@ -99,13 +99,11 @@ pub async fn handle_create_event(
         let id = Uuid::new_v4();
 
         // Channel for client subscriptions i.e from chatroom sub-broker to client write tasks
-        // TODO: Set capacity has a parameter
         let (mut broadcast_sender, broadcast_receiver) = broadcast::channel::<Response>(channel_buf_size);
 
         // Channel for client sending i.e from client read tasks to chatroom sub-broker
         // Needs to be saved for whenever a new client wishes to join this chatroom,
         // the sender can be cloned and used by the client
-        // TODO: add capacity to avoid overflow of messages received
         let (client_sender, mut client_receiver) = channel::bounded::<Event>(channel_buf_size);
 
         // Channel for synchronizing shutdown signal with main broker, chatroom gets receiving end
