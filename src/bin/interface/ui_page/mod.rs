@@ -90,7 +90,7 @@ impl UIPage {
     /// the server, and 'from_server' for receiving responses from the server. Note 'from_server' is
     /// used whenever the 'UIPage' is in the 'Chatroom' state, so the chatroom procedure can be run.
     #[instrument(ret, err, skip_all)]
-    pub async fn process_request<B, R, W>(&self, out: &mut RawTerminal<Stdout>, from_client: &mut B, to_server: W, from_server: R) -> Result<(), UserError>
+    pub async fn process_request<B, R, W>(&self, out: &mut RawTerminal<Stdout>, to_server: W, from_server: R) -> Result<(), UserError>
     where
         B: BufRead + BufReadExt + Unpin,
         R: ReadExt + Unpin,
