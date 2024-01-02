@@ -9,6 +9,7 @@ use async_std::{
 };
 use futures::{Future, FutureExt, Stream, StreamExt, select, stream};
 use termion::{clear, cursor, style, color, input::TermRead, event::Key, raw::IntoRawMode};
+use tracing::{instrument, error, debug, info};
 use crate::UserError;
 use rusty_chat::prelude::*;
 pub mod prelude {
@@ -17,6 +18,7 @@ pub mod prelude {
 
 pub enum Null {}
 
+#[instrument(ret, err, skip_all)]
 async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) -> Result<(), UserError> {
     // Get asynchronous stream of key events
     let mut keyboard = stream::iter(stdin().keys());
@@ -72,11 +74,11 @@ async fn keyboard_input_task(to_window: Sender<String>, shutdown: Sender<Null>) 
             _ => {}
         }
     }
-    // Todo: Logging maybe?
-    // println!("Keyboard sender channel dropped");
+    info!("Keyboard channel sender dropped, task shutting down");
     Ok(())
 }
 
+#[instrument(ret, err, skip(from_server, to_server))]
 pub async fn chat_window_task<'a, R, W>(username: &'a str, chatroom_name: &'a str, from_server: R, to_server: W) -> Result<(), UserError>
 where
     R: ReadExt + Unpin,
@@ -148,8 +150,7 @@ where
                 let msg = match client_msg {
                     Some(msg) => msg,
                     None if keyboard_recv.is_done() => {
-                        // Todo: log instead
-                        // println!("shutting down chat-window task from 'keyboard_recv'");
+                        info!(keyboard_recv = ?keyboard_recv, "Shutting down chat-window task from `keyboard_recv`");
                         to_server.write_all(&Frame::Quit.as_bytes())
                         .await
                         .map_err(|e| UserError::WriteError(e))?;
@@ -174,9 +175,7 @@ where
                 match shutdown_sig {
                     Some(null) => match null {},
                     None => {
-                        //TODO: log shutdown signal
-                        // println!("shutting down chat-window task from signal channel");
-                        // Send quit frame to server
+                        info!(keyboard_shutdown_recv = ?keyboard_shutdown_recv, "Shutdown signal received from keyboard shutdown receive channel");
                         to_server.write_all(&Frame::Quit.as_bytes())
                             .await
                             .map_err(|e| UserError::WriteError(e))?;
@@ -206,6 +205,7 @@ where
     }
 
     // Reset cursor
+    info!("Resetting cursor");
     let mut guard = stdout.lock();
     write!(guard, "{}{}{}", cursor::Goto(1, 1), clear::All, color::Fg(color::Reset))
         .map_err(|e| UserError::WriteError(e))?;
