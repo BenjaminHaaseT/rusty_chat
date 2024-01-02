@@ -25,10 +25,9 @@ pub struct Interface;
 
 impl Interface {
     /// Starts a new client connection to the chatroom server and runs the UI for the connecting client.
-
+    #[instrument(ret, err)]
     pub async fn run<A: ToSocketAddrs + Debug + Clone>(addrs: A) -> Result<(), UserError> {
         // Establish connection to server
-        // println!("Connecting to {:?}...", addrs);
         let mut stdout = stdout().into_raw_mode().map_err(|e| UserError::WriteError(e))?;
         write!(
             stdout, "{}{}{}{}{}{}",
@@ -50,7 +49,7 @@ impl Interface {
         let mut from_client = BufReader::new(stdin());
         // For reading and writing to the server
         let (mut from_server, mut to_server) = (&stream, &stream);
-
+        debug!("Entering main UI loop");
         // main loop
         loop {
             // Attempt to parse response from server, and transition state of ui
@@ -61,7 +60,7 @@ impl Interface {
             // Attempt to read client input and send a request to the server
             ui.process_request(&mut stdout, &mut from_client, to_server, from_server).await?;
         }
-
+        info!("Exit from chatroom server successful");
         write!(stdout, "\n\r{}", cursor::Show).map_err(|e| UserError::WriteError(e))?;
         stdout.flush().map_err(|e| UserError::WriteError(e))?;
         Ok(())

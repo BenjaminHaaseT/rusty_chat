@@ -13,6 +13,7 @@ use async_std::{
 
 use async_std::io::prelude::BufReadExt;
 use termion::{clear, cursor, style, color, raw::IntoRawMode, raw::RawTerminal, input::TermRead, event::Key, screen::{IntoAlternateScreen, AlternateScreen}};
+use tracing::{instrument, info, error, debug, warn};
 
 use crate::UserError;
 use rusty_chat::prelude::*;
@@ -58,12 +59,13 @@ impl UIPage {
     /// executes the associated logic for transitioning the the UI to the next state based on the response
     /// received. This method consumes 'self' and returns the next state of the UI after the appropriate logic
     /// is executed.
+    #[instrument(ret, err, skip_all)]
     pub async fn state_from_response<R: ReadExt + Unpin>(self, out: &mut RawTerminal<Stdout>, from_server: R) -> Result<UIPage, UserError> {
-        // let mut out = stdout().into_raw_mode().map_err(|e| UserError::RawOutput(e))?;
         // So it can be read from
         let mut from_server = from_server;
 
         // Attempt to parse a response from the given connection
+        debug!("Attempting to parse response from server...");
         let response = Response::try_parse(&mut from_server)
             .await
             .map_err(|e| UserError::ParseResponse(e))?;
@@ -87,7 +89,7 @@ impl UIPage {
     /// Takes three input streams, 'from_client' for client input, 'to_server' for sending 'Frames' to
     /// the server, and 'from_server' for receiving responses from the server. Note 'from_server' is
     /// used whenever the 'UIPage' is in the 'Chatroom' state, so the chatroom procedure can be run.
-    ///
+    #[instrument(ret, err, skip_all)]
     pub async fn process_request<B, R, W>(&self, out: &mut RawTerminal<Stdout>, from_client: &mut B, to_server: W, from_server: R) -> Result<(), UserError>
     where
         B: BufRead + BufReadExt + Unpin,
@@ -122,6 +124,7 @@ impl UIPage {
 
     /// Helper method for `state_from_response`, renders the `WelcomePage` and returns the next
     /// state in the success case.
+    #[instrument(ret, err, skip(out))]
     fn welcome_page_state_from_response_helper(response: Response, out: &mut RawTerminal<Stdout>) -> Result<UIPage, UserError> {
         if !response.is_connection_ok() {
             // Something wrong happened on the server's side, this should be kept hidden from
@@ -144,6 +147,7 @@ impl UIPage {
 
     /// Helper method for `state_from_response`, renders the `UsernamePage` and returns the next
     /// state in the success case.
+    #[instrument(ret, err, skip(out))]
     fn username_page_state_from_response_helper(response: Response, out: &mut RawTerminal<Stdout>) -> Result<UIPage, UserError> {
         match response {
             Response::UsernameAlreadyExists { username} => {
@@ -176,6 +180,7 @@ impl UIPage {
 
     /// Helper method for `state_from_response`, renders the `LobbyPage` and returns the next
     /// state in the success case.
+    #[instrument(ret, err, skip(from_server, out))]
     async fn lobby_page_state_from_response_helper<R: ReadExt + Unpin>(
         username: String,
         mut from_server: R,
@@ -299,6 +304,7 @@ impl UIPage {
     }
 
     /// Helper method for `state_from_response`. Returns the next state in the success case.
+    #[instrument(ret, err)]
     fn chatroom_state_from_response_helper(username: String, response: Response) -> Result<UIPage, UserError> {
         // We just need to ensure the client receives a ExitChatroom response
         // and return a QuitChatroom variant
@@ -311,6 +317,7 @@ impl UIPage {
     }
 
     /// Helper method for `state_from_response`, parses the response and returns the next state in the success case.
+    #[instrument(ret, err)]
     fn quit_chatroom_state_from_response_helper(username: String, response: Response) -> Result<UIPage, UserError> {
         // We just need to ensure the client receives a Lobby response
         match response {
@@ -330,6 +337,7 @@ impl UIPage {
     /// Helper method for 'process_request', renders the prompt associated with the 'UsernamePage',
     /// reads input from the user, validates the input and sends the request to the server
     /// via `to_server`.
+    #[instrument(ret, err, skip_all)]
     async fn username_process_request_helper<W>(out: &mut RawTerminal<Stdout>, mut to_server: W) -> Result<(), UserError>
     where
         W: WriteExt + Unpin,
@@ -349,6 +357,7 @@ impl UIPage {
             out.flush().map_err(|e| UserError::WriteError(e))?;
 
             // Read line from client input
+            debug!("Attempting to read input from client input stream");
             let selected_username = read_line_from_client_input(out, 3, 25)?;
 
             // Ensure we remove leading/trailing white space
@@ -389,6 +398,7 @@ impl UIPage {
     /// Helper method for 'process_request', renders the prompt associated with the 'LobbyPage',
     /// reads input from the user, validates the input and sends the request to the server
     /// via `to_server`.
+    #[instrument(ret, err, skip(out, to_server))]
     async fn lobby_process_request_helper<W>(username: &String, lobby_state: &ChatroomFrames, out: &mut RawTerminal<Stdout>, mut to_server: W) -> Result<(), UserError>
     where
         W: WriteExt + Unpin
@@ -450,6 +460,7 @@ impl UIPage {
             out.flush().map_err(|e| UserError::WriteError(e))?;
 
             // Read buffer from client input
+            debug!("Attempting to read line from client input stream");
             let buf = read_line_from_client_input(out, prompt_offset + 2, 1)?;
             let buf = buf.trim().to_owned();
 
@@ -484,8 +495,7 @@ impl UIPage {
                     color::Fg(color::Reset),
                 ).map_err(|e| UserError::WriteError(e))?;
                 out.flush().map_err(|e| UserError::WriteError(e))?;
-            }
-            else if buf != "q" && buf != "c" && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
+            } else if buf != "q" && buf != "c" && lobby_state.frames.binary_search_by(|frame| frame.name.cmp(&buf)).is_err() {
                 // Ensure the selected chatroom name exists in the current lobby state
                 write!(
                     out, "{}{}{}{}{}",
@@ -506,7 +516,9 @@ impl UIPage {
         match users_request.as_str() {
             "q" => {
                 // Client is electing to quit altogether
-                to_server.write_all(&Frame::Quit.as_bytes())
+                let frame = Frame::Quit;
+                info!(frame = ?frame, "Writing request to server");
+                to_server.write_all(&frame.as_bytes())
                     .await
                     .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
             },
@@ -567,12 +579,16 @@ impl UIPage {
                 };
                 // We can be sure the client has entered a valid chatroom name from here
                 // Send the frame to the server
-                to_server.write_all(&Frame::Create { chatroom_name }.as_bytes())
+                let frame = Frame::Create {chatroom_name};
+                info!(frame = ?frame, "Writing request to server");
+                to_server.write_all(&frame.as_bytes())
                     .await
                     .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
             },
             chatroom_name=> {
-                to_server.write_all(&Frame::Join { chatroom_name: chatroom_name.to_string() }.as_bytes())
+                let frame = Frame::Join { chatroom_name: chatroom_name.to_string() };
+                info!(frame = ?frame, "Writing request to server");
+                to_server.write_all(&frame.as_bytes())
                     .await
                     .map_err(|_| UserError::InternalServerError("an internal server error occurred"))?;
             }
