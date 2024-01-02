@@ -8,7 +8,7 @@ use async_std::{
     io::{Read, ReadExt, Write, WriteExt, BufRead, BufReader, prelude::BufReadExt, stdin},
     task
 };
-
+use tracing::{instrument, info, error, debug, warn};
 use termion::{raw::IntoRawMode, cursor, color, clear};
 
 use crate::interface::ui_page::UIPage;
@@ -25,6 +25,7 @@ pub struct Interface;
 
 impl Interface {
     /// Starts a new client connection to the chatroom server and runs the UI for the connecting client.
+
     pub async fn run<A: ToSocketAddrs + Debug + Clone>(addrs: A) -> Result<(), UserError> {
         // Establish connection to server
         // println!("Connecting to {:?}...", addrs);
