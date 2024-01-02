@@ -43,7 +43,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
     let (broker_sender, broker_receiver) = channel::bounded::<Event>(channel_buf_size);
 
     // spawn broker task
-    let broker_handle = task::spawn(broker(broker_receiver));
+    let broker_handle = task::spawn(broker(broker_receiver, channel_buf_size));
 
     // Listen for incoming client connections
     while let Some(stream) = listener.incoming().next().await {
@@ -380,7 +380,7 @@ fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
 /// # Parameters
 /// 'event_receiver' for incoming events sent directly from clients
 #[instrument(ret, err, skip_all)]
-async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
+async fn broker(event_receiver: Receiver<Event>, channel_buf_size: usize) -> Result<(), ServerError> {
     debug!("Inside main broker task");
     // For keeping track of current clients
     let mut clients: HashMap<Uuid, Client> = HashMap::new();
@@ -593,7 +593,8 @@ async fn broker(event_receiver: Receiver<Event>) -> Result<(), ServerError> {
                     &mut chatroom_brokers,
                     &mut chatroom_name_to_id,
                     &client_exit_sub_broker_sender,
-                    &disconnected_sub_broker_sender
+                    &disconnected_sub_broker_sender,
+                    channel_buf_size
                 ).await?;
             }
             Event::Join {peer_id, chatroom_name} => {

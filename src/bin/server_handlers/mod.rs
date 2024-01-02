@@ -60,7 +60,8 @@ pub async fn handle_create_event(
     chatroom_brokers: &mut HashMap<Uuid, Chatroom>,
     chatroom_name_to_id: &mut HashMap<Arc<String>, Uuid>,
     client_exit_sub_broker_sender: &AsyncStdSender<Event>,
-    disconnected_sub_broker_sender: &AsyncStdSender<(Uuid, AsyncStdReceiver<Event>, AsyncStdSender<Event>, TokioBroadcastSender<Response>)>
+    disconnected_sub_broker_sender: &AsyncStdSender<(Uuid, AsyncStdReceiver<Event>, AsyncStdSender<Event>, TokioBroadcastSender<Response>)>,
+    channel_buf_size: usize,
 ) -> Result<(), ServerError> {
     info!(peer_id = ?peer_id, chatroom_name, "Client {:?} has requested `Create`", peer_id);
 
@@ -99,13 +100,13 @@ pub async fn handle_create_event(
 
         // Channel for client subscriptions i.e from chatroom sub-broker to client write tasks
         // TODO: Set capacity has a parameter
-        let (mut broadcast_sender, broadcast_receiver) = broadcast::channel::<Response>(10_000);
+        let (mut broadcast_sender, broadcast_receiver) = broadcast::channel::<Response>(channel_buf_size);
 
         // Channel for client sending i.e from client read tasks to chatroom sub-broker
         // Needs to be saved for whenever a new client wishes to join this chatroom,
         // the sender can be cloned and used by the client
         // TODO: add capacity to avoid overflow of messages received
-        let (client_sender, mut client_receiver) = channel::unbounded::<Event>();
+        let (client_sender, mut client_receiver) = channel::bounded::<Event>(channel_buf_size);
 
         // Channel for synchronizing shutdown signal with main broker, chatroom gets receiving end
         // so it can be shutdown by the main broker
