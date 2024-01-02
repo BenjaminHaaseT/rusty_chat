@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
 use std::io::Read as StdRead;
+use clap::Parser;
 use tracing::{instrument, info, error, debug};
 use tracing_subscriber;
 use tracing_subscriber::layer::SubscriberExt;
@@ -714,8 +715,19 @@ async fn chatroom_broker(
     Ok(())
 }
 
-
-
+/// The command line interface used configure and start the server.
+#[derive(Parser)]
+struct CLI {
+    /// The address the server will be run on
+    #[arg(short = 'a')]
+    address: String,
+    /// The tcp port for the server
+    #[arg(short = 'p')]
+    port: u16,
+    /// The size of the channel buffer
+    #[arg(short = 'b')]
+    channel_buf_size: usize,
+}
 
 fn main() {
     let format = tracing_subscriber::fmt::layer()
@@ -731,9 +743,11 @@ fn main() {
         .with(format)
         .with(filter)
         .init();
-    let address = "0.0.0.0";
-    let port = 8080;
-    let res = task::block_on(accept_loop((address, port), 10_000));
+    let cli = CLI::parse();
+
+    // let address = "0.0.0.0";
+    // let port = 8080;
+    let res = task::block_on(accept_loop((cli.address.as_str(), cli.port), cli.channel_buf_size));
     if let Err(e) = res {
         eprintln!("error from main: {e}");
     } else {

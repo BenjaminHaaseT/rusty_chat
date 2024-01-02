@@ -99,7 +99,7 @@ pub async fn handle_create_event(
 
         // Channel for client subscriptions i.e from chatroom sub-broker to client write tasks
         // TODO: Set capacity has a parameter
-        let (mut broadcast_sender, broadcast_receiver) = broadcast::channel::<Response>(100);
+        let (mut broadcast_sender, broadcast_receiver) = broadcast::channel::<Response>(10_000);
 
         // Channel for client sending i.e from client read tasks to chatroom sub-broker
         // Needs to be saved for whenever a new client wishes to join this chatroom,
