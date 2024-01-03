@@ -306,11 +306,6 @@ async fn client_write_loop(
                 debug!(peer_id = ?client_id, "Client {} received a response from `chat_receiver`", client_id);
                 match resp {
                     Some(msg_resp) => {
-                        // let msg_resp = if let Ok(r) = msg_resp {
-                        //     r
-                        // } else {
-                        //     return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received an error from 'chat_receiver'", client_id)))
-                        // };
                         // Check if client has lagged or not
                         let msg_resp = match msg_resp {
                             Ok(msg_resp) => msg_resp,
