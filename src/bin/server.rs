@@ -12,8 +12,8 @@ use async_std::channel::{self, Sender, Receiver};
 use async_std::net::ToSocketAddrs;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::task;
-use tokio::sync::broadcast::{self, error::RecvError};
-use tokio_stream::wrappers::BroadcastStream;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 use futures::{
     future::{Future, FutureExt,  FusedFuture},
     stream::{Stream, StreamExt, FusedStream},
@@ -306,10 +306,20 @@ async fn client_write_loop(
                 debug!(peer_id = ?client_id, "Client {} received a response from `chat_receiver`", client_id);
                 match resp {
                     Some(msg_resp) => {
-                        let msg_resp = if let Ok(r) = msg_resp {
-                            r
-                        } else {
-                            return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received an error from 'chat_receiver'", client_id)))
+                        // let msg_resp = if let Ok(r) = msg_resp {
+                        //     r
+                        // } else {
+                        //     return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received an error from 'chat_receiver'", client_id)))
+                        // };
+                        // Check if client has lagged or not
+                        let msg_resp = match msg_resp {
+                            Ok(msg_resp) => msg_resp,
+                            Err(BroadcastStreamRecvError::Lagged(n)) => {
+                                // Log the error but do not quit the task altogether
+                                error!(peer_id = ?client_id, num_lagged_msg = n, "Client {} lagged {} messages", client_id, n);
+                                continue;
+                            }
+                            Err(e) => return Err(ServerError::ChannelReceiveError(format!("client {} write loop task received an error from 'chat_receiver'", client_id)))
                         };
                         // Filter the response, check that we only receive messages and filter
                         // all messages not from the current client
