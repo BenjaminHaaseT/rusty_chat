@@ -243,7 +243,6 @@ async fn client_write_loop(
         let response: Response = select! {
             // Check for a disconnection event
             null = shutdown.next().fuse() => {
-                // println!("Client {} write loop shutting down", client_id);
                 info!(peer_id = ?client_id, "Client {} write task shutting down", client_id);
                 match null {
                     Some(null) => match null {},
@@ -780,7 +779,7 @@ mod test {
             num_clients: 2353,
         };
 
-        let tag = chatroom.serialize().0;
+        let tag = chatroom.serialize();
 
         println!("{:?}", tag);
         assert_eq!(tag, [17, 0, 0, 0, 190, 18, 0, 0, 49, 9, 0, 0])
@@ -832,7 +831,7 @@ mod test {
         let chatroom_bytes = chatroom.as_bytes();
         println!("{:?}", chatroom_bytes);
 
-        let mut expected_bytes = chatroom.serialize().0.to_vec();
+        let mut expected_bytes = chatroom.serialize().to_vec();
         expected_bytes.extend_from_slice(name.as_bytes());
 
         assert_eq!(chatroom_bytes, expected_bytes);
