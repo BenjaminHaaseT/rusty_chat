@@ -422,11 +422,12 @@ impl UIPage {
                 8
             );
             // Write header for chatroom/capacity table
+            let capacity_width = usize::max(9, 2 * lobby_state.frames[0].capacity.to_string().len() + 1);
             write!(
                 out, "{}{}{}{}{}\n",
                 cursor::Goto(1, 2), clear::CurrentLine,
                 color::Fg(color::Rgb(116, 179, 252)),
-                format!("{:<w$} ~ {:>9}", "Chatroom", "Capacity", w=max_chatroom_name_length),
+                format!("{:<w$} ~ {:>cap_w$}", "Chatroom", "Capacity", w=max_chatroom_name_length, cap_w=capacity_width),
                 color::Fg(color::Reset)
             ).map_err(|e| UserError::WriteError(e))?;
             out.flush().map_err(|e| UserError::WriteError(e))?;
@@ -436,7 +437,7 @@ impl UIPage {
                     out, "{}{}{}{}{}\n",
                     cursor::Goto(1, (i + 3) as u16), clear::CurrentLine,
                     color::Fg(color::Rgb(215, 247, 241)),
-                    format!("{:<w$} ~ {:>4}/{:<4}", frame.name, frame.num_clients, frame.capacity, w=max_chatroom_name_length),
+                    format!("{:<w$} ~ {:>cap_w$}/{:>cap_w$}", frame.name, frame.num_clients, frame.capacity, w=max_chatroom_name_length, cap_w=(capacity_width/2)),
                     color::Fg(color::Reset),
                 ).map_err(|e| UserError::WriteError(e))?;
                 out.flush().map_err(|e| UserError::WriteError(e))?;
