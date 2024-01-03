@@ -12,7 +12,7 @@ use async_std::channel::{self, Sender, Receiver};
 use async_std::net::ToSocketAddrs;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::task;
-use tokio::sync::broadcast;
+use tokio::sync::broadcast::{self, error::RecvError};
 use tokio_stream::wrappers::BroadcastStream;
 use futures::{
     future::{Future, FutureExt,  FusedFuture},
