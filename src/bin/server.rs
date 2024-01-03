@@ -33,7 +33,7 @@ mod server_error;
 /// The accept loop for the server. Binds a 'TcpListener' to 'server_addrs', spawns the main
 /// broker task and awaits incoming client connections and spawns them onto new tasks for handling connections.
 #[instrument(ret, err)]
-async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_buf_size: usize) -> Result<(), ServerError> {
+async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_buf_size: usize, chatroom_capacity: usize) -> Result<(), ServerError> {
     info!("Listening at {:?}...", server_addrs);
     // Connect the supplied address
     let mut listener = TcpListener::bind(server_addrs.clone())
@@ -43,7 +43,7 @@ async fn accept_loop(server_addrs: impl ToSocketAddrs + Clone + Debug, channel_b
     let (broker_sender, broker_receiver) = channel::bounded::<Event>(channel_buf_size);
 
     // spawn broker task
-    let broker_handle = task::spawn(broker(broker_receiver, channel_buf_size));
+    let broker_handle = task::spawn(broker(broker_receiver, channel_buf_size, chatroom_capacity));
 
     // Listen for incoming client connections
     while let Some(stream) = listener.incoming().next().await {
@@ -380,7 +380,7 @@ fn create_lobby_state(chatroom_brokers: &HashMap<Uuid, Chatroom>) -> Vec<u8> {
 /// # Parameters
 /// 'event_receiver' for incoming events sent directly from clients
 #[instrument(ret, err, skip_all)]
-async fn broker(event_receiver: Receiver<Event>, channel_buf_size: usize) -> Result<(), ServerError> {
+async fn broker(event_receiver: Receiver<Event>, channel_buf_size: usize, chatroom_capacity: usize) -> Result<(), ServerError> {
     debug!("Inside main broker task");
     // For keeping track of current clients
     let mut clients: HashMap<Uuid, Client> = HashMap::new();
@@ -480,7 +480,6 @@ async fn broker(event_receiver: Receiver<Event>, channel_buf_size: usize) -> Res
                         chatroom_brokers.insert(chatroom_id, chatroom_broker);
                     }
                 }
-
                 // Continue listening for more events
                 continue;
             },
@@ -594,7 +593,8 @@ async fn broker(event_receiver: Receiver<Event>, channel_buf_size: usize) -> Res
                     &mut chatroom_name_to_id,
                     &client_exit_sub_broker_sender,
                     &disconnected_sub_broker_sender,
-                    channel_buf_size
+                    channel_buf_size,
+                    chatroom_capacity
                 ).await?;
             }
             Event::Join {peer_id, chatroom_name} => {
@@ -726,6 +726,10 @@ struct CLI {
     /// The size of the channel buffer for any channel that has a bounded buffer size
     #[arg(short = 'b')]
     channel_buf_size: usize,
+    /// Determines the size of the chatroom capacity
+    #[arg(short = 'c')]
+    chatroom_capacity: Option<usize>,
+
 }
 
 fn main() {
@@ -744,7 +748,11 @@ fn main() {
         .init();
     let cli = CLI::parse();
 
-    let res = task::block_on(accept_loop((cli.address.as_str(), cli.port), cli.channel_buf_size));
+    let res = task::block_on(accept_loop(
+        (cli.address.as_str(), cli.port),
+        cli.channel_buf_size,
+        cli.chatroom_capacity.unwrap_or(1000)
+    ));
     if let Err(e) = res {
         eprintln!("error from main: {e}");
     } else {

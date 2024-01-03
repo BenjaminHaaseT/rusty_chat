@@ -62,6 +62,7 @@ pub async fn handle_create_event(
     client_exit_sub_broker_sender: &AsyncStdSender<Event>,
     disconnected_sub_broker_sender: &AsyncStdSender<(Uuid, AsyncStdReceiver<Event>, AsyncStdSender<Event>, TokioBroadcastSender<Response>)>,
     channel_buf_size: usize,
+    chatroom_capacity: usize,
 ) -> Result<(), ServerError> {
     info!(peer_id = ?peer_id, chatroom_name, "Client {:?} has requested `Create`", peer_id);
 
@@ -119,7 +120,7 @@ pub async fn handle_create_event(
             client_subscriber: broadcast_sender.clone(),
             client_read_sender: client_sender.clone(),
             shutdown: Some(shutdown_sender),
-            capacity: 1000,
+            capacity: chatroom_capacity,
             num_clients: 1
         };
 
