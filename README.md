@@ -20,4 +20,8 @@ Another design goal of this project was to transform the terminal window into a 
 To run this code one only has to clone the repository to their local machine, and then follow the instructions for running the server or client, respectively.
 
 ### Server
-After cloning the repository one can pass commandline arguments that configure the server. For example `RUST_LOG=info cargo run --bin server -- -a 127.0.0.1 -p 8080 -b 10000 -c 1000`
+After cloning the repository one can pass commandline arguments that configure the server. For example `RUST_LOG=info cargo run --bin server -- -a 127.0.0.1 -p 8080 -b 10000 -c 1000`.
+In this example, the server is listening for incoming requests at address 127.0.0.1 and on port 8080, the buffer size for the main broker's channel is set to 10000 and the capacity for
+any chatroom is set to 1000. Depending on the value of `RUST_LOG` (in this example a log level of info was used), one should see 
+
+
