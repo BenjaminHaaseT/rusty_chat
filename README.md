@@ -44,8 +44,6 @@ their terminal window is now a UI for interacting with the server.
 | --- | --- |
 | The address of the server the client wishes to connect too | The port of the server |
 
-## Example
-Lets run through a simple example of what all the pieces put together look like. In this example the server will be run on address `0.0.0.0` at port `8080`. The command used is `RUST_LOG=info cargo run --bin server -- -a 0.0.0.0 -p 8080 -b 10000 -c 1000`. After entering this into the command line we get
 
 
 
