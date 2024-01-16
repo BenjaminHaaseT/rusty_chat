@@ -21,7 +21,16 @@ To run this code one only has to clone the repository to their local machine, an
 
 ### Server
 After cloning the repository one can pass commandline arguments that configure the server. For example `RUST_LOG=info cargo run --bin server -- -a 127.0.0.1 -p 8080 -b 10000 -c 1000`.
-In this example, the server is listening for incoming requests at address 127.0.0.1 and on port 8080, the buffer size for the main broker's channel is set to 10000 and the capacity for
+In this example, the server is listening for incoming requests at address `127.0.0.1` and on port `8080`, the buffer size for the main broker's channel is set to 10000 and the capacity for
 any chatroom is set to 1000. Depending on the value of `RUST_LOG` (in this example a log level of info was used), one should see 
+
+![](server.png)
+
+#### CLI arguments for the server
+
+| -a | -p | -b | -c |
+| --- | --- | --- | ---- |
+| The address the server will listen for requests | The port of the server | The size of the main broker task's buffer, limits the number of clients that connect | The capacity of a chatroom, limits the number of clients that can be inside a single chatroom |
+
 
 
