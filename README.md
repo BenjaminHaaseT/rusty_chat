@@ -63,5 +63,7 @@ In another new terminal window we can again run the client, which will be Bob. A
 
 Notice how the lobby will display available chatrooms with the number of clients and capacity for each chatroom. In order for Bob to join the Hello World chatroom, all he has to do is enter the name of the chatroom and press enter. Once inside the chatroom, both Alice and Bob can began sharing messages.
 
+![](messages.png)
+
 
 
