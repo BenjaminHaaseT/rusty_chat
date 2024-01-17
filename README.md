@@ -9,7 +9,7 @@ the server allows any client to:
 The server employs the actor model for managing shared state between asynchronous tasks. 
 
 ### Goals
-Personal goals for this project were: to gain more experience with writing asynchronous Rust code and Rust's asynchronous ecosystem.
+Personal goals for this project were: to gain more experience writing asynchronous Rust code and with Rust's asynchronous ecosystem.
 
 The main design goal of this project was to find an implementation that allowed distinct chatrooms to be managed as seperate tasks.
 Instead of having one task that manages the sending and receiving of _all_ messages, _for all_ chatrooms, each chatroom could be it's own unique task, managing the sending and receiving of its own messages. This was achieved by having a main broker task, which manages shared state for all tasks, spawn sub-broker tasks for new chatrooms. These sub-brokers would exclusively manage the sending and receiving of messages to and from clients that had joined the chatroom. That way the main broker would not have to manage the sending and receiving of messages for any particular chatroom. As a result of this design, the main broker task only had to manage the sub-broker tasks as another instance of shared state.
@@ -44,6 +44,8 @@ their terminal window is now a UI for interacting with the server.
 | --- | --- |
 | The address of the server the client wishes to connect too | The port of the server |
 
+## Example
+Here is a simple demonstration. We can start a server that will listen on address `0.0.0.0` using this command `RUST_LOG=info cargo run --bin server -- -a 0.0.0.0 -p 8080 -b 10000 -c 1000`. You do not have have the log level set to info, this is just personal preference. After running this command we should get output that looks something like
 
 
 
