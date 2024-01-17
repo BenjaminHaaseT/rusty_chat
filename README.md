@@ -49,7 +49,11 @@ Here is a simple demonstration. We can start a server that will listen on addres
 
 ![](example_server.png)
 
-Now, using two other additional terminal windows, we can run the client and have them chat with each other. To do so, open two additional terminal windows and enter the following command `cargo run --bin client -- -a 0.0.0.0 -p 8080`. Similar to the example we should be greeted with a prompt telling us to declare our username. In this example, one client will be named Alice and the other will Bob. After entering the user name we should enter the chatroom lobby, which will look like this
+Now, using two other additional terminal windows, we can run the client and have them chat with each other. To do so, first open an additional terminal window and enter the following command `cargo run --bin client -- -a 0.0.0.0 -p 8080`. Similar to the example we should be greeted with a prompt telling us to declare our username. In this example, one client will be named Alice and the other will Bob. After entering the user name we should enter the chatroom lobby, which will look like this
+
+![](lobby.png)
+
+We select the option to create a new chatroom, and name the new chatroom Hello World. After doing so in the Alice client we see the chatroom UI.
 
 
 
