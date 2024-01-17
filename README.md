@@ -17,10 +17,10 @@ Instead of having one task that manages the sending and receiving of _all_ messa
 Another design goal of this project was to transform the terminal window into a user interface, instead of having to build GUI. This was an interesting challenge and with the help of the `termion` crate, a simple working solution was found.
 
 ## Usage
-To run this code one only has to clone the repository to their local machine, and then follow the instructions for running the server or client, respectively.
+To run this code, one only has to clone the repository to their local machine, and then follow the instructions for running the server or client respectively.
 
 ### Server
-After cloning the repository one can pass commandline arguments that configure the server. For example `RUST_LOG=info cargo run --bin server -- -a 127.0.0.1 -p 8080 -b 10000 -c 1000`.
+After cloning the repository one can pass command line arguments that configure the server. For example `RUST_LOG=info cargo run --bin server -- -a 127.0.0.1 -p 8080 -b 10000 -c 1000`.
 In this example, the server is listening for incoming requests at address `127.0.0.1` and on port `8080`, the buffer size for the main broker's channel is set to `10000` and the capacity for
 any chatroom is set to `1000`. Depending on the value of `RUST_LOG` (in this example a log level of info was used), one should see 
 
@@ -30,10 +30,10 @@ any chatroom is set to `1000`. Depending on the value of `RUST_LOG` (in this exa
 
 | -a | -p | -b | -c |
 | --- | --- | --- | ---- |
-| The address at which the server will listen for requests | The port of the server | The size of the main broker task's buffer, limits the number of clients that connect | The capacity of a chatroom, limits the number of clients that can be inside a single chatroom. Argument is optional and has a default of 1000 |
+| The address at which the server will listen for requests | The port of the server | The size of the main broker task's channel buffer, limits the number of clients that connect | The capacity of a chatroom, limits the number of clients that can be inside a single chatroom. Argument is optional and has a default of 1000 |
 
 ### Client
-In order to start the client all one needs to do is pass address and port of the server as command line arguments. For example `cargo run --bin client -- -a 127.0.0.1 -p 8080`, will run the client executable and connect to the server a address `127.0.0.1` on port `8080`. One should see
+In order to start the client all one needs to do is pass address and port of the server as command line arguments. For example `cargo run --bin client -- -a 127.0.0.1 -p 8080`, will run the client executable and connect to the server at address `127.0.0.1` on port `8080`. One should see
 
 ![](client_prompt.png)
 
