@@ -47,5 +47,11 @@ their terminal window is now a UI for interacting with the server.
 ## Example
 Here is a simple demonstration. We can start a server that will listen on address `0.0.0.0` using this command `RUST_LOG=info cargo run --bin server -- -a 0.0.0.0 -p 8080 -b 10000 -c 1000`. You do not have have the log level set to info, this is just personal preference. After running this command we should get output that looks something like
 
+![](example_server.png)
+
+Now, using two other additional terminal windows, we can run the client and have them chat with each other. To do so, open two additional terminal windows and enter the following command `cargo run --bin client -- -a 0.0.0.0 -p 8080`. Similar to the example we should be greeted with a prompt telling us to declare our username. In this example, one client will be named Alice and the other will Bob. After entering the user name we should enter the chatroom lobby, which will look like this
+
+
+
 
 
