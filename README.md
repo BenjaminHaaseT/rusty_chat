@@ -59,8 +59,9 @@ We select the option to create a new chatroom, and name the new chatroom Hello W
 
 In another new terminal window we can again run the client, which will be Bob. After running the program and entering the username, the Bob client's lobby will look like 
 
+![](bob_lobby.png)
 
-
+Notice how the lobby will display available chatrooms with the number of clients and capacity for each chatroom. In order for Bob to join the Hello World chatroom, all he has to do is enter the name of the chatroom and press enter. Once inside the chatroom, both Alice and Bob can began sharing messages.
 
 
 
