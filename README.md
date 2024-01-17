@@ -55,6 +55,11 @@ Now, using two other additional terminal windows, we can run the client and have
 
 We select the option to create a new chatroom, and name the new chatroom Hello World. After doing so in the Alice client we see the chatroom UI.
 
+![](chatroom.png)
+
+In another new terminal window we can again run the client, which will be Bob. After running the program and entering the username, the Bob client's lobby will look like 
+
+
 
 
 
