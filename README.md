@@ -33,7 +33,7 @@ any chatroom is set to `1000`. Depending on the value of `RUST_LOG` (in this exa
 | The address at which the server will listen for requests | The port of the server | The size of the main broker task's channel buffer, limits the number of clients that connect | The capacity of a chatroom, limits the number of clients that can be inside a single chatroom. Argument is optional and has a default of 1000 |
 
 ### Client
-In order to start the client all one needs to do is pass address and port of the server as command line arguments. For example `cargo run --bin client -- -a 127.0.0.1 -p 8080`, will run the client executable and connect to the server at address `127.0.0.1` on port `8080`. One should see
+In order to start the client, all one needs to do is pass in the address and port of the server as command line arguments. For example `cargo run --bin client -- -a 127.0.0.1 -p 8080`, will run the client executable and connect to the server at address `127.0.0.1` on port `8080`. One should see
 
 ![](client_prompt.png)
 
